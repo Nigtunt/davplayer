@@ -127,10 +127,20 @@ fun BrowseScreen(settings: Settings, sourcesVersion: Int) {
     val client = remember(source.id) { WebDavClient(source.url, source.user, source.pass) }
 
     val stack = remember(source.id) {
+        // 重建从根目录到上次目录的完整路径链，保证「回上级/回主目录」可用
+        val chain = mutableStateListOf(client.rootPath)
         val last = settings.lastPath
-        mutableStateListOf(
-            if (!last.isNullOrBlank() && last.startsWith(client.rootPath)) last else client.rootPath
-        )
+        if (!last.isNullOrBlank() && last.startsWith(client.rootPath) && last != client.rootPath) {
+            val rel = last.removePrefix(client.rootPath).trim('/')
+            if (rel.isNotEmpty()) {
+                var cur = client.rootPath
+                rel.split('/').filter { it.isNotEmpty() }.forEach { seg ->
+                    cur += "$seg/"
+                    chain.add(cur)
+                }
+            }
+        }
+        chain
     }
     val path = stack.last()
     var entries by remember(source.id) { mutableStateOf<List<DavEntry>?>(null) }
