@@ -182,6 +182,71 @@ class HistoryStore(private val ctx: Context) {
     }
 }
 
+// ---------- 漫画阅读历史 ----------
+
+data class ComicHistoryItem(
+    val bookId: String,
+    val seriesTitle: String,
+    val title: String,
+    val page: Int,          // 1-based
+    val pagesCount: Int,
+    val updatedAt: Long
+) {
+    val progress: Float
+        get() = if (pagesCount > 0) (page.toFloat() / pagesCount).coerceIn(0f, 1f) else 0f
+}
+
+class ComicHistoryStore(private val ctx: Context) {
+
+    private val file: File get() = File(ctx.filesDir, "comic_history.json")
+
+    @Synchronized
+    fun list(): List<ComicHistoryItem> {
+        if (!file.exists()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(file.readText())
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                ComicHistoryItem(
+                    bookId = o.getString("bookId"),
+                    seriesTitle = o.optString("seriesTitle"),
+                    title = o.optString("title"),
+                    page = o.optInt("page"),
+                    pagesCount = o.optInt("pagesCount"),
+                    updatedAt = o.optLong("updatedAt")
+                )
+            }.sortedByDescending { it.updatedAt }
+        }.getOrDefault(emptyList())
+    }
+
+    fun get(bookId: String): ComicHistoryItem? = list().firstOrNull { it.bookId == bookId }
+
+    @Synchronized
+    fun upsert(item: ComicHistoryItem) {
+        val items = list().filterNot { it.bookId == item.bookId }.toMutableList()
+        items.add(item)
+        write(items)
+    }
+
+    @Synchronized
+    fun remove(bookId: String) = write(list().filterNot { it.bookId == bookId })
+
+    private fun write(items: List<ComicHistoryItem>) {
+        val arr = JSONArray()
+        items.sortedByDescending { it.updatedAt }.take(200).forEach { h ->
+            arr.put(JSONObject().apply {
+                put("bookId", h.bookId)
+                put("seriesTitle", h.seriesTitle)
+                put("title", h.title)
+                put("page", h.page)
+                put("pagesCount", h.pagesCount)
+                put("updatedAt", h.updatedAt)
+            })
+        }
+        file.writeText(arr.toString())
+    }
+}
+
 fun formatMs(ms: Long): String {
     if (ms < 0) return "--:--"
     val totalSec = ms / 1000

@@ -1,5 +1,7 @@
 package com.davplayer.app
 
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -37,12 +40,14 @@ import coil.request.ImageRequest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 class ReaderActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_BOOK_ID = "bookId"
         const val EXTRA_TITLE = "title"
+        const val EXTRA_SERIES = "seriesTitle"
         const val EXTRA_PAGE = "page"
     }
 
@@ -50,6 +55,7 @@ class ReaderActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val bookId = intent.getStringExtra(EXTRA_BOOK_ID) ?: run { finish(); return }
         val title = intent.getStringExtra(EXTRA_TITLE) ?: ""
+        val seriesTitle = intent.getStringExtra(EXTRA_SERIES) ?: ""
         val startPage = intent.getIntExtra(EXTRA_PAGE, 0)
 
         val settings = Settings(this)
@@ -63,12 +69,22 @@ class ReaderActivity : ComponentActivity() {
                     client = client,
                     bookId = bookId,
                     title = title,
+                    seriesTitle = seriesTitle,
                     startPage = startPage,
                     onBack = { finish() }
                 )
             }
         }
     }
+}
+
+fun startReader(ctx: Context, bookId: String, title: String, page: Int = 0, seriesTitle: String = "") {
+    ctx.startActivity(Intent(ctx, ReaderActivity::class.java).apply {
+        putExtra(ReaderActivity.EXTRA_BOOK_ID, bookId)
+        putExtra(ReaderActivity.EXTRA_TITLE, title)
+        putExtra(ReaderActivity.EXTRA_SERIES, seriesTitle)
+        putExtra(ReaderActivity.EXTRA_PAGE, page)
+    })
 }
 
 enum class ReadMode(val label: String) {
@@ -80,20 +96,12 @@ fun ReaderScreen(
     client: KomgaClient,
     bookId: String,
     title: String,
+    seriesTitle: String,
     startPage: Int,
     onBack: () -> Unit
 ) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val imageLoader = remember(client) {
-        ImageLoader.Builder(ctx).okHttpClient(client.http).crossfade(false).build()
-    }
-
     var pages by remember { mutableStateOf<List<KomgaPage>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var mode by remember { mutableStateOf(ReadMode.LTR) }
-    val controlsVisible = remember { mutableStateOf(false) }
-    val currentPage = remember { mutableStateOf(0) }   // 0-based
 
     LaunchedEffect(bookId) {
         try {
@@ -103,190 +111,265 @@ fun ReaderScreen(
         }
     }
 
-    // 进度同步：停留 1.2s 后上报 Komga（page 为 1-based）
-    suspend fun syncProgress(pageIndex: Int, pageCount: Int) {
-        runCatching {
-            client.markReadProgress(
-                bookId,
-                page = pageIndex + 1,
-                completed = pageIndex >= pageCount - 1
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        when {
+            error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("加载失败：$error", color = Color.White)
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = onBack) { Text("返回") }
+                }
+            }
+            pages == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            pages!!.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("这本书没有页面", color = Color.White)
+            }
+            else -> ReaderContent(
+                client = client,
+                bookId = bookId,
+                title = title,
+                seriesTitle = seriesTitle,
+                pages = pages!!,
+                startPage = startPage,
+                onBack = onBack
             )
         }
     }
+}
 
-    LaunchedEffect(currentPage.value, pages?.size) {
-        val p = pages ?: return@LaunchedEffect
-        if (p.isEmpty()) return@LaunchedEffect
-        delay(1200)
-        syncProgress(currentPage.value, p.size)
+@Composable
+private fun ReaderContent(
+    client: KomgaClient,
+    bookId: String,
+    title: String,
+    seriesTitle: String,
+    pages: List<KomgaPage>,
+    startPage: Int,
+    onBack: () -> Unit
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val historyStore = remember { ComicHistoryStore(ctx) }
+    val imageLoader = remember(client) {
+        ImageLoader.Builder(ctx).okHttpClient(client.http).crossfade(false).build()
     }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            val p = pages
-            if (p != null && p.isNotEmpty()) {
-                // 退出时也同步一次
-                kotlinx.coroutines.runBlocking {
-                    runCatching { client.markReadProgress(bookId, currentPage.value + 1, currentPage.value >= p.size - 1) }
-                }
+    val pageCount = pages.size
+    var mode by remember { mutableStateOf(ReadMode.LTR) }
+    val controlsVisible = remember { mutableStateOf(false) }
+    val currentPage = remember { mutableStateOf((startPage - 1).coerceIn(0, pageCount - 1)) } // 0-based
+    var sliderDrag by remember { mutableStateOf<Float?>(null) }
+
+    val pagerState = rememberPagerState(initialPage = currentPage.value) { pageCount }
+    val listState = rememberLazyListState()
+
+    // 模式切换时保持页码
+    LaunchedEffect(mode) {
+        if (mode == ReadMode.VERTICAL) listState.scrollToItem(currentPage.value)
+        else pagerState.scrollToPage(currentPage.value)
+    }
+
+    // 跟踪当前页
+    LaunchedEffect(pagerState, mode) {
+        if (mode != ReadMode.VERTICAL) {
+            snapshotFlow { pagerState.settledPage }.collectLatest { currentPage.value = it }
+        }
+    }
+    LaunchedEffect(listState, mode) {
+        if (mode == ReadMode.VERTICAL) {
+            snapshotFlow { listState.firstVisibleItemIndex }.collectLatest { currentPage.value = it }
+        }
+    }
+
+    val scrolling = if (mode == ReadMode.VERTICAL) listState.isScrollInProgress
+    else pagerState.isScrollInProgress
+
+    // 进度同步：Komga 云端 + 本地漫画历史（停留 1.2s 后记录）
+    fun saveProgress(pageIndex: Int) {
+        val page = pageIndex + 1
+        historyStore.upsert(
+            ComicHistoryItem(
+                bookId = bookId,
+                seriesTitle = seriesTitle,
+                title = title,
+                page = page,
+                pagesCount = pageCount,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        scope.launch {
+            runCatching {
+                client.markReadProgress(bookId, page = page, completed = pageIndex >= pageCount - 1)
             }
+        }
+    }
+
+    LaunchedEffect(currentPage.value) {
+        delay(1200)
+        saveProgress(currentPage.value)
+    }
+    DisposableEffect(Unit) {
+        onDispose { saveProgress(currentPage.value) }
+    }
+
+    fun jumpTo(index: Int) {
+        val target = index.coerceIn(0, pageCount - 1)
+        currentPage.value = target
+        scope.launch {
+            if (mode == ReadMode.VERTICAL) listState.scrollToItem(target)
+            else pagerState.scrollToPage(target)
         }
     }
 
     CompositionLocalProvider(LocalImageLoader provides imageLoader) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
-            when {
-                error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("加载失败：$error", color = Color.White)
-                        Spacer(Modifier.height(12.dp))
-                        Button(onClick = onBack) { Text("返回") }
+
+            // -------- 阅读内容 --------
+            if (mode == ReadMode.VERTICAL) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { controlsVisible.value = !controlsVisible.value }
+                ) {
+                    items(pageCount, key = { it }) { i ->
+                        AsyncImage(
+                            model = ImageRequest.Builder(ctx)
+                                .data(client.pageUrl(bookId, pages[i].number))
+                                .build(),
+                            contentDescription = "第 ${i + 1} 页",
+                            contentScale = ContentScale.FillWidth,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
-                pages == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-                pages!!.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("这本书没有页面", color = Color.White)
-                }
-                else -> {
-                    val pageList = pages!!
-                    val pageCount = pageList.size
-
-                    if (mode == ReadMode.VERTICAL) {
-                        val listState = rememberLazyListState()
-                        // 首次定位
-                        LaunchedEffect(Unit) {
-                            if (startPage > 0) listState.scrollToItem((startPage - 1).coerceIn(0, pageCount - 1))
-                        }
-                        LaunchedEffect(listState) {
-                            snapshotFlow { listState.firstVisibleItemIndex }.collectLatest {
-                                currentPage.value = it
-                            }
-                        }
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) { controlsVisible.value = !controlsVisible.value }
-                        ) {
-                            items(pageCount, key = { it }) { i ->
-                                ReaderPage(client, bookId, pageList[i].number, ContentScale.FillWidth)
-                            }
-                        }
-                    } else {
-                        val pagerState = rememberPagerState(
-                            initialPage = (startPage - 1).coerceIn(0, pageCount - 1)
-                        ) { pageCount }
-                        val zoomed = remember { mutableStateOf(false) }
-                        LaunchedEffect(pagerState) {
-                            snapshotFlow { pagerState.settledPage }.collectLatest {
-                                currentPage.value = it
-                            }
-                        }
-                        HorizontalPager(
-                            state = pagerState,
-                            reverseLayout = mode == ReadMode.RTL,
-                            userScrollEnabled = !zoomed.value,
-                            modifier = Modifier.fillMaxSize()
-                        ) { index ->
-                            PagerPage(
-                                client = client,
-                                bookId = bookId,
-                                pageNumber = pageList[index].number,
-                                zoomed = zoomed,
-                                onTapZone = { zone ->
-                                    when (zone) {
-                                        0 -> { // 左区
-                                            scope.launch {
-                                                val target = if (mode == ReadMode.RTL) pagerState.currentPage + 1 else pagerState.currentPage - 1
-                                                if (target in 0 until pageCount) pagerState.animateScrollToPage(target)
-                                                else controlsVisible.value = !controlsVisible.value
-                                            }
-                                        }
-                                        2 -> { // 右区
-                                            scope.launch {
-                                                val target = if (mode == ReadMode.RTL) pagerState.currentPage - 1 else pagerState.currentPage + 1
-                                                if (target in 0 until pageCount) pagerState.animateScrollToPage(target)
-                                                else controlsVisible.value = !controlsVisible.value
-                                            }
-                                        }
-                                        else -> controlsVisible.value = !controlsVisible.value
-                                    }
+            } else {
+                val zoomed = remember { mutableStateOf(false) }
+                HorizontalPager(
+                    state = pagerState,
+                    reverseLayout = mode == ReadMode.RTL,
+                    userScrollEnabled = !zoomed.value,
+                    modifier = Modifier.fillMaxSize()
+                ) { index ->
+                    PagerPage(
+                        client = client,
+                        bookId = bookId,
+                        pageNumber = pages[index].number,
+                        zoomed = zoomed,
+                        onTapZone = { zone ->
+                            when (zone) {
+                                0 -> {
+                                    val target = if (mode == ReadMode.RTL) pagerState.currentPage + 1 else pagerState.currentPage - 1
+                                    if (target in 0 until pageCount) scope.launch { pagerState.animateScrollToPage(target) }
+                                    else controlsVisible.value = !controlsVisible.value
                                 }
-                            )
-                        }
-                        // 预取下一页
-                        LaunchedEffect(currentPage.value) {
-                            val next = currentPage.value + 1
-                            if (next < pageCount) {
-                                imageLoader.enqueue(
-                                    ImageRequest.Builder(ctx)
-                                        .data(client.pageUrl(bookId, pageList[next].number))
-                                        .build()
-                                )
-                            }
-                        }
-                    }
-
-                    // 顶部栏
-                    AnimatedVisibility(
-                        visible = controlsVisible.value,
-                        enter = fadeIn(), exit = fadeOut(),
-                        modifier = Modifier.align(Alignment.TopStart)
-                    ) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(Color.Black.copy(alpha = 0.65f))
-                                .padding(horizontal = 4.dp, vertical = 4.dp)
-                                .statusBarsPadding(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Color.White)
-                            }
-                            Text(
-                                title, color = Color.White,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            TextButton(onClick = {
-                                mode = when (mode) {
-                                    ReadMode.LTR -> ReadMode.RTL
-                                    ReadMode.RTL -> ReadMode.VERTICAL
-                                    ReadMode.VERTICAL -> ReadMode.LTR
+                                2 -> {
+                                    val target = if (mode == ReadMode.RTL) pagerState.currentPage - 1 else pagerState.currentPage + 1
+                                    if (target in 0 until pageCount) scope.launch { pagerState.animateScrollToPage(target) }
+                                    else controlsVisible.value = !controlsVisible.value
                                 }
-                            }) {
-                                Text(mode.label, color = MaterialTheme.colorScheme.primary)
+                                else -> controlsVisible.value = !controlsVisible.value
                             }
                         }
+                    )
+                }
+                // 预取下一页
+                LaunchedEffect(currentPage.value) {
+                    val next = currentPage.value + 1
+                    if (next < pageCount) {
+                        imageLoader.enqueue(
+                            ImageRequest.Builder(ctx)
+                                .data(client.pageUrl(bookId, pages[next].number))
+                                .build()
+                        )
                     }
+                }
+            }
 
-                    // 底部：页码 + 跳转
-                    AnimatedVisibility(
-                        visible = controlsVisible.value,
-                        enter = fadeIn(), exit = fadeOut(),
-                        modifier = Modifier.align(Alignment.BottomStart)
-                    ) {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(Color.Black.copy(alpha = 0.65f))
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                                .navigationBarsPadding()
-                        ) {
-                            Text(
-                                "第 ${currentPage.value + 1} / $pageCount 页",
-                                color = Color.White,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
+            // -------- 滑动中的页数提示 --------
+            if (scrolling && !controlsVisible.value) {
+                Surface(
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp),
+                    color = Color.Black.copy(alpha = 0.65f),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text(
+                        "第 ${currentPage.value + 1} / $pageCount 页",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                    )
+                }
+            }
+
+            // -------- 顶部栏 --------
+            AnimatedVisibility(
+                visible = controlsVisible.value,
+                enter = fadeIn(), exit = fadeOut(),
+                modifier = Modifier.align(Alignment.TopStart)
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.65f))
+                        .statusBarsPadding()
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Color.White)
                     }
+                    Text(
+                        title, color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = {
+                        mode = when (mode) {
+                            ReadMode.LTR -> ReadMode.RTL
+                            ReadMode.RTL -> ReadMode.VERTICAL
+                            ReadMode.VERTICAL -> ReadMode.LTR
+                        }
+                    }) {
+                        Text(mode.label, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+
+            // -------- 底部：可拖动进度条（拖动只变数字，松手跳转） --------
+            AnimatedVisibility(
+                visible = controlsVisible.value,
+                enter = fadeIn(), exit = fadeOut(),
+                modifier = Modifier.align(Alignment.BottomStart)
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.65f))
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        "第 ${(sliderDrag?.roundToInt() ?: (currentPage.value + 1))} / $pageCount 页",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Slider(
+                        value = sliderDrag ?: (currentPage.value + 1).toFloat(),
+                        valueRange = 1f..pageCount.toFloat().coerceAtLeast(1f),
+                        onValueChange = { sliderDrag = it },        // 拖动中只更新数字
+                        onValueChangeFinished = {                    // 松手才跳转
+                            sliderDrag?.let { jumpTo(it.roundToInt() - 1) }
+                            sliderDrag = null
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
         }
@@ -349,17 +432,4 @@ private fun PagerPage(
             modifier = Modifier.fillMaxSize()
         )
     }
-}
-
-/** 竖向滚动模式的单页 */
-@Composable
-private fun ReaderPage(client: KomgaClient, bookId: String, pageNumber: Int, scale: ContentScale) {
-    AsyncImage(
-        model = ImageRequest.Builder(LocalContext.current)
-            .data(client.pageUrl(bookId, pageNumber))
-            .build(),
-        contentDescription = "第 $pageNumber 页",
-        contentScale = scale,
-        modifier = Modifier.fillMaxWidth()
-    )
 }

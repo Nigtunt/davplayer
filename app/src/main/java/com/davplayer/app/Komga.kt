@@ -44,6 +44,13 @@ data class KomgaBook(
 
 data class KomgaPage(val number: Int, val width: Int, val height: Int, val mediaType: String)
 
+data class KomgaReadList(
+    val id: String,
+    val name: String,
+    val bookIds: List<String>,
+    val summary: String
+)
+
 data class PagedResult<T>(val items: List<T>, val isLast: Boolean, val totalElements: Long)
 
 class KomgaClient(baseUrl: String, email: String, pass: String) {
@@ -133,6 +140,67 @@ class KomgaClient(baseUrl: String, email: String, pass: String) {
     fun seriesThumbUrl(id: String) = "$base/api/v1/series/$id/thumbnail"
     fun bookThumbUrl(id: String) = "$base/api/v1/books/$id/thumbnail"
     fun pageUrl(bookId: String, pageNumber: Int) = "$base/api/v1/books/$bookId/pages/$pageNumber"
+    fun readListThumbUrl(id: String) = "$base/api/v1/readlists/$id/thumbnail"
+
+    // ---------- 阅读列表 ----------
+
+    suspend fun readLists(libraryId: String? = null): List<KomgaReadList> {
+        val q = StringBuilder("/api/v1/readlists?unpaged=true")
+        if (!libraryId.isNullOrBlank()) q.append("&library_id=").append(libraryId)
+        val root = JSONObject(getJson(q.toString()))
+        val content = root.getJSONArray("content")
+        return (0 until content.length()).map { i ->
+            val o = content.getJSONObject(i)
+            val ids = o.getJSONArray("bookIds")
+            KomgaReadList(
+                id = o.getString("id"),
+                name = o.getString("name"),
+                bookIds = (0 until ids.length()).map { ids.getString(it) },
+                summary = o.optString("summary")
+            )
+        }
+    }
+
+    suspend fun readListBooks(readListId: String): List<KomgaBook> =
+        parseBookPage(getJson("/api/v1/readlists/$readListId/books?unpaged=true&sort=readlist.number,asc")).items
+
+    /** 新建阅读列表，返回 id */
+    suspend fun createReadList(name: String): String = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("name", name)
+            .put("bookIds", JSONArray())
+            .put("ordered", false)
+            .put("summary", "")
+            .toString()
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+        http.newCall(Request.Builder().url("$base/api/v1/readlists").post(body).build())
+            .execute().use { r ->
+                if (r.code !in 200..299) throw IOException("创建失败: HTTP ${r.code}")
+                JSONObject(r.body?.string() ?: "{}").getString("id")
+            }
+    }
+
+    /** 更新阅读列表的书籍集合（全量替换 bookIds） */
+    suspend fun updateReadListBooks(readListId: String, bookIds: List<String>) =
+        withContext(Dispatchers.IO) {
+            val arr = JSONArray()
+            bookIds.forEach { arr.put(it) }
+            val body = JSONObject().put("bookIds", arr).toString()
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+            http.newCall(
+                Request.Builder().url("$base/api/v1/readlists/$readListId").patch(body).build()
+            ).execute().use { r ->
+                if (r.code !in 200..299) throw IOException("更新阅读列表失败: HTTP ${r.code}")
+            }
+        }
+
+    suspend fun deleteReadList(readListId: String) = withContext(Dispatchers.IO) {
+        http.newCall(
+            Request.Builder().url("$base/api/v1/readlists/$readListId").delete().build()
+        ).execute().use { r ->
+            if (r.code !in 200..299 && r.code != 204) throw IOException("删除失败: HTTP ${r.code}")
+        }
+    }
 
     // ---------- 解析 ----------
 

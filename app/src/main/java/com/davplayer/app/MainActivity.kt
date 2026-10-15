@@ -38,6 +38,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import coil.ImageLoader
+import coil.compose.AsyncImage
+import coil.compose.LocalImageLoader
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -316,11 +319,15 @@ private fun decodeName(path: String): String = runCatching {
     java.net.URLDecoder.decode(path.trimEnd('/').substringAfterLast('/'), "UTF-8")
 }.getOrDefault(path)
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen() {
     val ctx = LocalContext.current
     val store = remember { HistoryStore(ctx) }
+    val comicStore = remember { ComicHistoryStore(ctx) }
+    val settings = remember { Settings(ctx) }
 
+    var seg by remember { mutableStateOf(0) }   // 0=视频 1=漫画
     var resumeTick by remember { mutableStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -332,67 +339,168 @@ fun HistoryScreen() {
     }
 
     val items = remember(resumeTick) { store.list() }
+    val comics = remember(resumeTick) { comicStore.list() }
     val fmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
 
-    if (items.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("暂无播放历史", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        return
+    // 漫画封面走带认证的 Coil 加载器
+    val komgaLoader = remember {
+        if (settings.komgaUrl.isBlank()) null
+        else ImageLoader.Builder(ctx)
+            .okHttpClient(KomgaClient(settings.komgaUrl, settings.komgaUser, settings.komgaPass).http)
+            .build()
     }
 
-    LazyColumn(Modifier.fillMaxSize()) {
-        items(items, key = { it.href }) { item ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { startPlayer(ctx, item.href, item.title, item.positionMs) }
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val cover = remember(item.href, resumeTick) {
-                    val f = store.coverFile(item.href)
-                    if (f.exists()) BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() else null
+    Column(Modifier.fillMaxSize()) {
+        SingleChoiceSegmentedButtonRow(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            SegmentedButton(
+                selected = seg == 0,
+                onClick = { seg = 0 },
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+            ) { Text("视频") }
+            SegmentedButton(
+                selected = seg == 1,
+                onClick = { seg = 1 },
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+            ) { Text("漫画") }
+        }
+
+        if (seg == 0) {
+            // ---------- 视频历史 ----------
+            if (items.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("暂无视频播放历史", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Box(
-                    Modifier
-                        .size(112.dp, 63.dp)
-                        .clip(RoundedCornerShape(6.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (cover != null) {
-                        Image(cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    } else {
-                        Surface(
-                            Modifier.fillMaxSize(),
-                            color = MaterialTheme.colorScheme.surfaceVariant
+            } else LazyColumn(Modifier.fillMaxSize()) {
+                items(items, key = { it.href }) { item ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { startPlayer(ctx, item.href, item.title, item.positionMs) }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val cover = remember(item.href, resumeTick) {
+                            val f = store.coverFile(item.href)
+                            if (f.exists()) BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() else null
+                        }
+                        Box(
+                            Modifier
+                                .size(112.dp, 63.dp)
+                                .clip(RoundedCornerShape(6.dp)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Movie, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (cover != null) {
+                                Image(cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            } else {
+                                Surface(
+                                    Modifier.fillMaxSize(),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Movie, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
                             }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "看到 ${formatMs(item.positionMs)} / ${formatMs(item.durationMs)} · ${fmt.format(Date(item.updatedAt))}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            LinearProgressIndicator(
+                                progress = { item.progress },
+                                modifier = Modifier.fillMaxWidth().height(3.dp)
+                            )
+                        }
+                        IconButton(onClick = { store.remove(item.href); resumeTick++ }) {
+                            Icon(Icons.Default.Delete, "删除记录", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    HorizontalDivider(thickness = 0.5.dp)
+                }
+            }
+        } else {
+            // ---------- 漫画历史 ----------
+            if (comics.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("暂无漫画阅读历史", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                val listContent: @Composable () -> Unit = {
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        items(comics, key = { it.bookId }) { item ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        startReader(ctx, item.bookId, item.title, item.page, item.seriesTitle)
+                                    }
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (komgaLoader != null) {
+                                    AsyncImage(
+                                        model = komgaLoader.let {
+                                            KomgaClient(settings.komgaUrl, settings.komgaUser, settings.komgaPass)
+                                                .bookThumbUrl(item.bookId)
+                                        },
+                                        contentDescription = item.title,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.size(63.dp, 90.dp).clip(RoundedCornerShape(6.dp))
+                                    )
+                                } else {
+                                    Surface(
+                                        Modifier.size(63.dp, 90.dp).clip(RoundedCornerShape(6.dp)),
+                                        color = MaterialTheme.colorScheme.surfaceVariant
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.MenuBook, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    if (item.seriesTitle.isNotBlank()) {
+                                        Text(item.seriesTitle, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "读到第 ${item.page} 页 / 共 ${item.pagesCount} 页 · ${fmt.format(Date(item.updatedAt))}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    LinearProgressIndicator(
+                                        progress = { item.progress },
+                                        modifier = Modifier.fillMaxWidth().height(3.dp)
+                                    )
+                                }
+                                IconButton(onClick = { comicStore.remove(item.bookId); resumeTick++ }) {
+                                    Icon(Icons.Default.Delete, "删除记录", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            HorizontalDivider(thickness = 0.5.dp)
                         }
                     }
                 }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "看到 ${formatMs(item.positionMs)} / ${formatMs(item.durationMs)} · ${fmt.format(Date(item.updatedAt))}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    LinearProgressIndicator(
-                        progress = { item.progress },
-                        modifier = Modifier.fillMaxWidth().height(3.dp)
-                    )
-                }
-                IconButton(onClick = { store.remove(item.href); resumeTick++ }) {
-                    Icon(Icons.Default.Delete, "删除记录", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (komgaLoader != null) {
+                    CompositionLocalProvider(LocalImageLoader provides komgaLoader) { listContent() }
+                } else {
+                    listContent()
                 }
             }
-            HorizontalDivider(thickness = 0.5.dp)
         }
     }
 }
