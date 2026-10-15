@@ -9,6 +9,7 @@ import coil.decode.ImageSource
 import coil.fetch.FetchResult
 import coil.fetch.Fetcher
 import coil.fetch.SourceResult
+import coil.key.Keyer
 import coil.request.Options
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -88,6 +89,28 @@ object SecureImageStore {
             fileFor(ctx, url).writeBytes(cipher.iv + enc)
         }
     }
+
+    /** 缓存统计：文件数 to 总字节数 */
+    fun stats(ctx: Context): Pair<Int, Long> {
+        var count = 0
+        var bytes = 0L
+        listOf(
+            File(ctx.filesDir, "secure_covers"),
+            File(ctx.cacheDir, "secure_pages")
+        ).forEach { d ->
+            d.listFiles()?.forEach { count++; bytes += it.length() }
+        }
+        return count to bytes
+    }
+
+    /** 清空全部加密图片缓存，返回清理的文件数 */
+    @Synchronized
+    fun clear(ctx: Context): Int {
+        val (count, _) = stats(ctx)
+        File(ctx.filesDir, "secure_covers").deleteRecursively()
+        File(ctx.cacheDir, "secure_pages").deleteRecursively()
+        return count
+    }
 }
 
 /** Coil Fetcher：所有 SecureImage 请求都经过加密缓存层 */
@@ -98,16 +121,24 @@ class SecureImageFetcher(
 ) : Fetcher {
 
     override suspend fun fetch(): FetchResult = withContext(Dispatchers.IO) {
+        val shortUrl = image.url.substringAfterLast('/').ifBlank { image.url.takeLast(40) }
+        val t0 = android.os.SystemClock.elapsedRealtime()
         if (!image.refresh) {
             SecureImageStore.get(ctx, image.url)?.let {
+                AppLog.log("CACHE", "命中加密缓存 $shortUrl (${android.os.SystemClock.elapsedRealtime() - t0}ms)")
                 return@withContext toResult(it, DataSource.DISK)
             }
         }
+        AppLog.log("CACHE", (if (image.refresh) "强制刷新 " else "缓存未命中 ") + shortUrl + "，联网下载")
         val bytes = http.newCall(Request.Builder().url(image.url).build()).execute().use { r ->
             if (!r.isSuccessful) throw IOException("HTTP ${r.code}")
             r.body?.bytes() ?: throw IOException("empty body")
         }
         SecureImageStore.put(ctx, image.url, bytes)
+        AppLog.log(
+            "CACHE",
+            "下载完成 $shortUrl (${bytes.size / 1024} KB, ${android.os.SystemClock.elapsedRealtime() - t0}ms)，已加密保存"
+        )
         toResult(bytes, DataSource.NETWORK)
     }
 
@@ -127,9 +158,19 @@ class SecureImageFetcher(
     }
 }
 
+/** SecureImage 的内存缓存键：让解码后的 Bitmap 进 Coil 内存缓存，避免重复解密 */
+class SecureImageKeyer : Keyer<SecureImage> {
+    override fun key(data: SecureImage, options: Options): String =
+        data.url + if (data.refresh) "#refresh" else ""
+}
+
 /** 构建带加密缓存 + 认证的 Komga 图片加载器（统一入口） */
 fun buildKomgaImageLoader(ctx: Context, client: KomgaClient): ImageLoader =
     ImageLoader.Builder(ctx)
-        .components { add(SecureImageFetcher.Factory(ctx.applicationContext, client.http)) }
-        .crossfade(true)
+        .components {
+            add(SecureImageKeyer())
+            add(SecureImageFetcher.Factory(ctx.applicationContext, client.http))
+        }
+        // 关闭淡入：缓存命中直接显示，避免"闪一下"
+        .crossfade(false)
         .build()

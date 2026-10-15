@@ -62,6 +62,7 @@ class KomgaClient(baseUrl: String, email: String, pass: String) {
     val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
+        .addInterceptor(HttpLogInterceptor())
         .addInterceptor { chain ->
             chain.proceed(chain.request().newBuilder().header("Authorization", authHeader).build())
         }

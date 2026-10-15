@@ -751,6 +751,51 @@ fun SettingsScreen(
             }
         }
 
+        // ---------- 存储与缓存 ----------
+        item {
+            Spacer(Modifier.height(8.dp))
+            Text("存储与缓存", style = MaterialTheme.typography.titleMedium)
+        }
+        item {
+            val ctx = LocalContext.current
+            var cacheStats by remember { mutableStateOf(SecureImageStore.stats(ctx)) }
+            var clearMsg by remember { mutableStateOf<String?>(null) }
+            var showLog by remember { mutableStateOf(false) }
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "加密图片缓存：${cacheStats.first} 个文件 · ${formatSize(cacheStats.second)}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "漫画封面与页图以 AES-256-GCM 加密保存，清理后浏览时会重新下载",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    clearMsg?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            val n = SecureImageStore.clear(ctx)
+                            AppLog.log("CACHE", "手动清空图片缓存（$n 个文件）")
+                            cacheStats = SecureImageStore.stats(ctx)
+                            clearMsg = "✓ 已清空 $n 个文件"
+                        }) { Text("清空图片缓存") }
+                        OutlinedButton(onClick = { showLog = true }) { Text("查看日志") }
+                    }
+                }
+            }
+            if (showLog) LogViewerDialog(onDismiss = { showLog = false })
+        }
+
         item {
             Spacer(Modifier.height(8.dp))
             Text("播放", style = MaterialTheme.typography.titleMedium)
@@ -773,4 +818,65 @@ fun SettingsScreen(
             )
         }
     }
+}
+
+/** 日志查看器：实时刷新显示最近的请求与缓存日志 */
+@Composable
+fun LogViewerDialog(onDismiss: () -> Unit) {
+    var entries by remember { mutableStateOf(AppLog.entries()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(800)
+            entries = AppLog.entries()
+        }
+    }
+    val timeFmt = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("运行日志", modifier = Modifier.weight(1f))
+                TextButton(onClick = { AppLog.clear(); entries = emptyList() }) { Text("清空") }
+            }
+        },
+        text = {
+            if (entries.isEmpty()) {
+                Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                    Text("暂无日志", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(Modifier.fillMaxWidth().height(400.dp)) {
+                    items(entries.size) { i ->
+                        val e = entries[i]
+                        Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                            Text(
+                                timeFmt.format(Date(e.timeMs)),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                e.tag,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (e.tag == "CACHE") MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.secondary
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                e.message,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        HorizontalDivider(thickness = 0.3.dp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    )
 }

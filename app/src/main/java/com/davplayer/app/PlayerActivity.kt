@@ -92,8 +92,9 @@ class PlayerActivity : ComponentActivity() {
         val url = client.fileUrl(href)
         val headers = client.authHeaders()
 
-        val dataSourceFactory = OkHttpDataSource.Factory(OkHttpClient())
-            .setDefaultRequestProperties(headers)
+        val dataSourceFactory = OkHttpDataSource.Factory(
+            OkHttpClient.Builder().addInterceptor(HttpLogInterceptor()).build()
+        ).setDefaultRequestProperties(headers)
         val exo = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .build()

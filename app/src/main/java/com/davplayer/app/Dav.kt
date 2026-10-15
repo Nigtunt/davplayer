@@ -44,6 +44,7 @@ class WebDavClient(baseUrl: String, username: String, password: String) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
+        .addInterceptor(HttpLogInterceptor())
         .build()
 
     fun authHeaders(): Map<String, String> =
