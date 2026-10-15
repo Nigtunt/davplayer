@@ -85,6 +85,25 @@ class Settings(ctx: Context) {
     var lastPath: String?
         get() = sp.getString("lastPath", null)
         set(v) = sp.edit().putString("lastPath", v).apply()
+
+    // ---------- Komga 服务器 ----------
+
+    var komgaUrl: String
+        get() = sp.getString("komgaUrl", "") ?: ""
+        set(v) = sp.edit().putString("komgaUrl", v).apply()
+
+    var komgaUser: String
+        get() = sp.getString("komgaUser", "") ?: ""
+        set(v) = sp.edit().putString("komgaUser", v).apply()
+
+    var komgaPass: String
+        get() = sp.getString("komgaPass", "") ?: ""
+        set(v) = sp.edit().putString("komgaPass", v).apply()
+
+    /** "system" | "light" | "dark" */
+    var themeMode: String
+        get() = sp.getString("themeMode", "dark") ?: "dark"
+        set(v) = sp.edit().putString("themeMode", v).apply()
 }
 
 data class HistoryItem(

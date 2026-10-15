@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -56,7 +57,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Tab(val label: String) {
-    Browse("浏览"), History("历史"), Settings("设置")
+    Browse("浏览"), Komga("漫画"), History("历史"), Settings("设置")
 }
 
 fun startPlayer(ctx: Context, href: String, title: String, positionMs: Long = 0L) {
@@ -73,8 +74,10 @@ fun App() {
     val settings = remember { Settings(ctx) }
     var tab by remember { mutableStateOf(Tab.Browse) }
     var sourcesVersion by remember { mutableStateOf(0) }
+    var themeMode by remember { mutableStateOf(settings.themeMode) }
+    val dark = resolveDark(themeMode)
 
-    MaterialTheme(colorScheme = darkColorScheme()) {
+    MaterialTheme(colorScheme = davColorScheme(dark)) {
         Scaffold(
             bottomBar = {
                 NavigationBar {
@@ -83,6 +86,11 @@ fun App() {
                         onClick = { tab = Tab.Browse },
                         icon = { Icon(Icons.Default.Folder, null) },
                         label = { Text(Tab.Browse.label) })
+                    NavigationBarItem(
+                        selected = tab == Tab.Komga,
+                        onClick = { tab = Tab.Komga },
+                        icon = { Icon(Icons.Default.MenuBook, null) },
+                        label = { Text(Tab.Komga.label) })
                     NavigationBarItem(
                         selected = tab == Tab.History,
                         onClick = { tab = Tab.History },
@@ -99,8 +107,21 @@ fun App() {
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
                     Tab.Browse -> BrowseScreen(settings, sourcesVersion)
+                    Tab.Komga -> KomgaScreen(
+                        settings = settings,
+                        dark = dark,
+                        onToggleTheme = {
+                            themeMode = if (dark) "light" else "dark"
+                            settings.themeMode = themeMode
+                        }
+                    )
                     Tab.History -> HistoryScreen()
-                    Tab.Settings -> SettingsScreen(settings, onChanged = { sourcesVersion++ })
+                    Tab.Settings -> SettingsScreen(
+                        settings,
+                        onChanged = { sourcesVersion++ },
+                        themeMode = themeMode,
+                        onThemeChange = { themeMode = it }
+                    )
                 }
             }
         }
@@ -378,7 +399,12 @@ fun HistoryScreen() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(settings: Settings, onChanged: () -> Unit) {
+fun SettingsScreen(
+    settings: Settings,
+    onChanged: () -> Unit,
+    themeMode: String,
+    onThemeChange: (String) -> Unit
+) {
     var sources by remember { mutableStateOf(settings.getSources()) }
     var activeId by remember { mutableStateOf(settings.activeSource()?.id) }
 
@@ -408,6 +434,20 @@ fun SettingsScreen(settings: Settings, onChanged: () -> Unit) {
         Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // ---------- 外观主题 ----------
+        item {
+            Text("外观", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色").forEach { (m, label) ->
+                    FilterChip(
+                        selected = themeMode == m,
+                        onClick = { settings.themeMode = m; onThemeChange(m) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+        }
+
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("WebDAV 源", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -528,6 +568,80 @@ fun SettingsScreen(settings: Settings, onChanged: () -> Unit) {
                             }) { Text("保存") }
                             OutlinedButton(onClick = { showForm = false }) { Text("取消") }
                         }
+                    }
+                }
+            }
+        }
+
+        // ---------- Komga 服务器 ----------
+        item {
+            Spacer(Modifier.height(8.dp))
+            Text("Komga 服务器", style = MaterialTheme.typography.titleMedium)
+        }
+        item {
+            var kUrl by remember { mutableStateOf(settings.komgaUrl) }
+            var kUser by remember { mutableStateOf(settings.komgaUser) }
+            var kPass by remember { mutableStateOf(settings.komgaPass) }
+            var kMsg by remember { mutableStateOf<String?>(null) }
+            var testing by remember { mutableStateOf(false) }
+            val scope = rememberCoroutineScope()
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = kUrl, onValueChange = { kUrl = it },
+                        label = { Text("地址（如 http://192.168.1.10:25600）") },
+                        singleLine = true, modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = kUser, onValueChange = { kUser = it },
+                        label = { Text("邮箱") },
+                        singleLine = true, modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = kPass, onValueChange = { kPass = it },
+                        label = { Text("密码") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    kMsg?.let { msg ->
+                        Text(
+                            msg,
+                            color = if (msg.startsWith("✓")) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            if (kUrl.isBlank() || !(kUrl.startsWith("http://") || kUrl.startsWith("https://"))) {
+                                kMsg = "✗ 请填写以 http:// 或 https:// 开头的地址"
+                                return@Button
+                            }
+                            settings.komgaUrl = kUrl.trim()
+                            settings.komgaUser = kUser.trim()
+                            settings.komgaPass = kPass
+                            kMsg = "✓ 已保存"
+                            onChanged()
+                        }) { Text("保存") }
+                        OutlinedButton(
+                            enabled = !testing && kUrl.isNotBlank(),
+                            onClick = {
+                                scope.launch {
+                                    testing = true
+                                    kMsg = null
+                                    val ok = KomgaClient(kUrl, kUser, kPass).testConnection()
+                                    kMsg = if (ok) "✓ 连接成功" else "✗ 连接失败，请检查地址和账号"
+                                    testing = false
+                                }
+                            }
+                        ) { Text(if (testing) "测试中…" else "测试连接") }
                     }
                 }
             }
