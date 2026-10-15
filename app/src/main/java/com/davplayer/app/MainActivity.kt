@@ -3,10 +3,6 @@ package com.davplayer.app
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
-import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,7 +12,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
@@ -28,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -37,7 +37,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -61,12 +67,12 @@ fun startPlayer(ctx: Context, href: String, title: String, positionMs: Long = 0L
     })
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App() {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
     var tab by remember { mutableStateOf(Tab.Browse) }
+    var sourcesVersion by remember { mutableStateOf(0) }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
         Scaffold(
@@ -75,7 +81,7 @@ fun App() {
                     NavigationBarItem(
                         selected = tab == Tab.Browse,
                         onClick = { tab = Tab.Browse },
-                        icon = { Icon(Icons.Default.Home, null) },
+                        icon = { Icon(Icons.Default.Folder, null) },
                         label = { Text(Tab.Browse.label) })
                     NavigationBarItem(
                         selected = tab == Tab.History,
@@ -92,9 +98,9 @@ fun App() {
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
-                    Tab.Browse -> BrowseScreen(settings)
+                    Tab.Browse -> BrowseScreen(settings, sourcesVersion)
                     Tab.History -> HistoryScreen()
-                    Tab.Settings -> SettingsScreen(settings)
+                    Tab.Settings -> SettingsScreen(settings, onChanged = { sourcesVersion++ })
                 }
             }
         }
@@ -103,29 +109,35 @@ fun App() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BrowseScreen(settings: Settings) {
+fun BrowseScreen(settings: Settings, sourcesVersion: Int) {
     val ctx = LocalContext.current
-    val client = remember(settings.serverUrl, settings.username, settings.password) {
-        if (settings.serverUrl.isBlank()) null
-        else runCatching { WebDavClient(settings.serverUrl, settings.username, settings.password) }.getOrNull()
-    }
-    if (client == null) {
+    val historyStore = remember { HistoryStore(ctx) }
+
+    val sources = remember(sourcesVersion) { settings.getSources() }
+    var activeId by remember(sourcesVersion) { mutableStateOf(settings.activeSource()?.id) }
+    val source = sources.firstOrNull { it.id == activeId } ?: sources.firstOrNull()
+
+    if (source == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("请先在「设置」中配置 WebDAV 地址", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("请先在「设置」中添加并保存 WebDAV 源", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
 
-    val startPath = remember {
+    val client = remember(source.id) { WebDavClient(source.url, source.user, source.pass) }
+
+    val stack = remember(source.id) {
         val last = settings.lastPath
-        if (!last.isNullOrBlank() && last.startsWith(client.rootPath)) last else client.rootPath
+        mutableStateListOf(
+            if (!last.isNullOrBlank() && last.startsWith(client.rootPath)) last else client.rootPath
+        )
     }
-    val stack = remember { mutableStateListOf(startPath) }
     val path = stack.last()
-    var entries by remember { mutableStateOf<List<DavEntry>?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    var refreshTick by remember { mutableStateOf(0) }
+    var entries by remember(source.id) { mutableStateOf<List<DavEntry>?>(null) }
+    var error by remember(source.id) { mutableStateOf<String?>(null) }
+    var loading by remember(source.id) { mutableStateOf(false) }
+    var refreshTick by remember(source.id) { mutableStateOf(0) }
+    var sourceMenuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(path, refreshTick) {
@@ -146,18 +158,48 @@ fun BrowseScreen(settings: Settings) {
         TopAppBar(
             title = {
                 Text(
-                    decodeName(path).ifBlank { "/" },
+                    decodeName(path).ifBlank { source.name },
                     maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
             },
             navigationIcon = {
-                if (stack.size > 1) {
-                    IconButton(onClick = { stack.removeAt(stack.size - 1) }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回上级")
-                    }
+                // 回上级目录
+                IconButton(
+                    onClick = { stack.removeAt(stack.size - 1) },
+                    enabled = stack.size > 1
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "上级目录")
                 }
             },
             actions = {
+                // 回主目录
+                IconButton(
+                    onClick = {
+                        while (stack.size > 1) stack.removeAt(stack.size - 1)
+                    },
+                    enabled = stack.size > 1
+                ) {
+                    Icon(Icons.Default.Home, "主目录")
+                }
+                // 切换源
+                Box {
+                    TextButton(onClick = { sourceMenuOpen = true }) {
+                        Text(source.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Icon(Icons.Default.ArrowDropDown, null)
+                    }
+                    DropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
+                        sources.forEach { s ->
+                            DropdownMenuItem(
+                                text = { Text(if (s.id == source.id) "✓ ${s.name}" else s.name) },
+                                onClick = {
+                                    settings.activeSourceId = s.id
+                                    activeId = s.id
+                                    sourceMenuOpen = false
+                                }
+                            )
+                        }
+                    }
+                }
                 IconButton(onClick = { refreshTick++ }) {
                     Icon(Icons.Default.Refresh, "刷新")
                 }
@@ -184,12 +226,11 @@ fun BrowseScreen(settings: Settings) {
                     items(visible, key = { it.href }) { entry ->
                         ListItem(
                             leadingContent = {
-                                Icon(
-                                    if (entry.isDir) Icons.Default.Folder else Icons.Default.Movie,
-                                    null,
-                                    tint = if (entry.isDir) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                if (!entry.isDir) {
+                                    FileCover(historyStore, entry.href)
+                                } else {
+                                    Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
+                                }
                             },
                             headlineContent = {
                                 Text(entry.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -219,6 +260,27 @@ fun BrowseScreen(settings: Settings) {
     }
 }
 
+/** 文件列表中的封面缩略图：已有封面才显示，否则显示默认图标 */
+@Composable
+fun FileCover(store: HistoryStore, href: String) {
+    val bitmap by produceState<ImageBitmap?>(null, href) {
+        value = withContext(Dispatchers.IO) {
+            val f = store.coverFile(href)
+            if (f.exists()) BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() else null
+        }
+    }
+    val b = bitmap
+    if (b != null) {
+        Image(
+            b, null,
+            Modifier.size(64.dp, 36.dp).clip(RoundedCornerShape(4.dp)),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        Icon(Icons.Default.Movie, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
 private fun decodeName(path: String): String = runCatching {
     java.net.URLDecoder.decode(path.trimEnd('/').substringAfterLast('/'), "UTF-8")
 }.getOrDefault(path)
@@ -228,7 +290,6 @@ fun HistoryScreen() {
     val ctx = LocalContext.current
     val store = remember { HistoryStore(ctx) }
 
-    // 从播放器返回时刷新
     var resumeTick by remember { mutableStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -307,59 +368,181 @@ fun HistoryScreen() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(settings: Settings) {
-    var url by remember { mutableStateOf(settings.serverUrl) }
-    var user by remember { mutableStateOf(settings.username) }
-    var pass by remember { mutableStateOf(settings.password) }
+fun SettingsScreen(settings: Settings, onChanged: () -> Unit) {
+    var sources by remember { mutableStateOf(settings.getSources()) }
+    var activeId by remember { mutableStateOf(settings.activeSource()?.id) }
+
+    // 编辑表单状态
+    var showForm by remember { mutableStateOf(false) }
+    var editingId by remember { mutableStateOf<String?>(null) }
+    var fName by remember { mutableStateOf("") }
+    var fUrl by remember { mutableStateOf("") }
+    var fUser by remember { mutableStateOf("") }
+    var fPass by remember { mutableStateOf("") }
+    var formError by remember { mutableStateOf<String?>(null) }
+
+    fun openForm(src: DavSource?) {
+        editingId = src?.id
+        fName = src?.name ?: ""
+        fUrl = src?.url ?: ""
+        fUser = src?.user ?: ""
+        fPass = src?.pass ?: ""
+        formError = null
+        showForm = true
+    }
+
     var lpSpeed by remember { mutableStateOf(settings.longPressSpeed) }
     val speedOptions = listOf(1.5f, 2.0f, 2.5f, 3.0f, 4.0f)
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+    LazyColumn(
+        Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("WebDAV 服务器", style = MaterialTheme.typography.titleMedium)
-        OutlinedTextField(
-            value = url,
-            onValueChange = { url = it; settings.serverUrl = it },
-            label = { Text("地址（如 http://192.168.1.10:5244/dav）") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = user,
-            onValueChange = { user = it; settings.username = it },
-            label = { Text("用户名（可空）") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = pass,
-            onValueChange = { pass = it; settings.password = it },
-            label = { Text("密码（可空）") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(Modifier.height(8.dp))
-        Text("播放", style = MaterialTheme.typography.titleMedium)
-        Text("长按屏幕时的倍速：${"%.1f".format(lpSpeed)}x", style = MaterialTheme.typography.bodyMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            speedOptions.forEach { s ->
-                FilterChip(
-                    selected = lpSpeed == s,
-                    onClick = { lpSpeed = s; settings.longPressSpeed = s },
-                    label = { Text("${"%.1f".format(s)}x") }
-                )
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("WebDAV 源", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = { openForm(null) }) {
+                    Icon(Icons.Default.Add, null)
+                    Text("添加")
+                }
             }
         }
-        Text(
-            "配置立即生效。播放时长按屏幕任意位置即可临时加速，松开恢复正常速度。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+
+        if (sources.isEmpty() && !showForm) {
+            item {
+                Text("还没有 WebDAV 源，点击「添加」创建。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        items(sources, key = { it.id }) { s ->
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = s.id == activeId,
+                        onClick = {
+                            settings.activeSourceId = s.id
+                            activeId = s.id
+                            onChanged()
+                        }
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(s.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            s.url,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(onClick = { openForm(s) }) {
+                        Icon(Icons.Default.Edit, "编辑")
+                    }
+                    IconButton(onClick = {
+                        sources = sources.filterNot { it.id == s.id }
+                        settings.saveSources(sources)
+                        onChanged()
+                    }) {
+                        Icon(Icons.Default.Delete, "删除")
+                    }
+                }
+            }
+        }
+
+        if (showForm) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            if (editingId == null) "添加 WebDAV 源" else "编辑 WebDAV 源",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        OutlinedTextField(
+                            value = fName, onValueChange = { fName = it },
+                            label = { Text("名称（如：家里 NAS）") },
+                            singleLine = true, modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = fUrl, onValueChange = { fUrl = it },
+                            label = { Text("地址（如 http://192.168.1.10:5244/dav）") },
+                            singleLine = true, modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = fUser, onValueChange = { fUser = it },
+                            label = { Text("用户名（可空）") },
+                            singleLine = true, modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = fPass, onValueChange = { fPass = it },
+                            label = { Text("密码（可空）") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (formError != null) {
+                            Text(formError!!, color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                if (fUrl.isBlank() || !(fUrl.startsWith("http://") || fUrl.startsWith("https://"))) {
+                                    formError = "请填写以 http:// 或 https:// 开头的地址"
+                                    return@Button
+                                }
+                                val src = DavSource(
+                                    id = editingId ?: java.util.UUID.randomUUID().toString(),
+                                    name = fName.ifBlank { "WebDAV" },
+                                    url = fUrl.trim(),
+                                    user = fUser.trim(),
+                                    pass = fPass
+                                )
+                                sources = sources.filterNot { it.id == src.id } + src
+                                settings.saveSources(sources)
+                                if (activeId == null || sources.size == 1) {
+                                    settings.activeSourceId = src.id
+                                    activeId = src.id
+                                }
+                                showForm = false
+                                onChanged()
+                            }) { Text("保存") }
+                            OutlinedButton(onClick = { showForm = false }) { Text("取消") }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(8.dp))
+            Text("播放", style = MaterialTheme.typography.titleMedium)
+        }
+        item {
+            Text("长按屏幕时的倍速：${"%.1f".format(lpSpeed)}x", style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                speedOptions.forEach { s ->
+                    FilterChip(
+                        selected = lpSpeed == s,
+                        onClick = { lpSpeed = s; settings.longPressSpeed = s },
+                        label = { Text("${"%.1f".format(s)}x") }
+                    )
+                }
+            }
+            Text(
+                "长按屏幕任意位置临时加速，松开恢复正常速度。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }

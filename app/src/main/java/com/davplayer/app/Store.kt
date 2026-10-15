@@ -5,21 +5,76 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
+import java.util.UUID
+
+data class DavSource(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val url: String,
+    val user: String,
+    val pass: String
+)
 
 class Settings(ctx: Context) {
     private val sp = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
-    var serverUrl: String
-        get() = sp.getString("serverUrl", "") ?: ""
-        set(v) = sp.edit().putString("serverUrl", v).apply()
+    // ---------- 多 WebDAV 源 ----------
 
-    var username: String
-        get() = sp.getString("username", "") ?: ""
-        set(v) = sp.edit().putString("username", v).apply()
+    fun getSources(): List<DavSource> {
+        val json = sp.getString("sources", null)
+        if (json != null) {
+            return runCatching {
+                val arr = JSONArray(json)
+                (0 until arr.length()).map { i ->
+                    val o = arr.getJSONObject(i)
+                    DavSource(
+                        id = o.optString("id").ifBlank { UUID.randomUUID().toString() },
+                        name = o.optString("name"),
+                        url = o.optString("url"),
+                        user = o.optString("user"),
+                        pass = o.optString("pass")
+                    )
+                }
+            }.getOrDefault(emptyList())
+        }
+        // 迁移旧的单源配置
+        val legacyUrl = sp.getString("serverUrl", "") ?: ""
+        if (legacyUrl.isBlank()) return emptyList()
+        val migrated = listOf(
+            DavSource(
+                id = "default",
+                name = "默认源",
+                url = legacyUrl,
+                user = sp.getString("username", "") ?: "",
+                pass = sp.getString("password", "") ?: ""
+            )
+        )
+        saveSources(migrated)
+        return migrated
+    }
 
-    var password: String
-        get() = sp.getString("password", "") ?: ""
-        set(v) = sp.edit().putString("password", v).apply()
+    fun saveSources(list: List<DavSource>) {
+        val arr = JSONArray()
+        list.forEach { s ->
+            arr.put(JSONObject().apply {
+                put("id", s.id)
+                put("name", s.name)
+                put("url", s.url)
+                put("user", s.user)
+                put("pass", s.pass)
+            })
+        }
+        sp.edit().putString("sources", arr.toString()).apply()
+    }
+
+    var activeSourceId: String?
+        get() = sp.getString("activeSourceId", null)
+        set(v) = sp.edit().putString("activeSourceId", v).apply()
+
+    fun activeSource(): DavSource? {
+        val list = getSources()
+        return list.firstOrNull { it.id == activeSourceId } ?: list.firstOrNull()
+    }
 
     /** 长按屏幕时的倍速 */
     var longPressSpeed: Float
