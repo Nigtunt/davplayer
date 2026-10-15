@@ -152,9 +152,7 @@ private fun ReaderContent(
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val historyStore = remember { ComicHistoryStore(ctx) }
-    val imageLoader = remember(client) {
-        ImageLoader.Builder(ctx).okHttpClient(client.http).crossfade(false).build()
-    }
+    val imageLoader = remember(client) { buildKomgaImageLoader(ctx, client) }
 
     val pageCount = pages.size
     var mode by remember { mutableStateOf(ReadMode.LTR) }
@@ -239,9 +237,7 @@ private fun ReaderContent(
                 ) {
                     items(pageCount, key = { it }) { i ->
                         AsyncImage(
-                            model = ImageRequest.Builder(ctx)
-                                .data(client.pageUrl(bookId, pages[i].number))
-                                .build(),
+                            model = SecureImage(client.pageUrl(bookId, pages[i].number)),
                             contentDescription = "第 ${i + 1} 页",
                             contentScale = ContentScale.FillWidth,
                             modifier = Modifier.fillMaxWidth()
@@ -284,7 +280,7 @@ private fun ReaderContent(
                     if (next < pageCount) {
                         imageLoader.enqueue(
                             ImageRequest.Builder(ctx)
-                                .data(client.pageUrl(bookId, pages[next].number))
+                                .data(SecureImage(client.pageUrl(bookId, pages[next].number)))
                                 .build()
                         )
                     }
@@ -424,9 +420,7 @@ private fun PagerPage(
         contentAlignment = Alignment.Center
     ) {
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(client.pageUrl(bookId, pageNumber))
-                .build(),
+            model = SecureImage(client.pageUrl(bookId, pageNumber)),
             contentDescription = "第 $pageNumber 页",
             contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxSize()

@@ -62,10 +62,8 @@ fun KomgaScreen(settings: Settings, dark: Boolean, onToggleTheme: () -> Unit) {
     val client = remember(settings.komgaUrl, settings.komgaUser, settings.komgaPass) {
         KomgaClient(settings.komgaUrl, settings.komgaUser, settings.komgaPass)
     }
-    // 封面/页面图片需要带认证头，使用专用 ImageLoader
-    val imageLoader = remember(client) {
-        ImageLoader.Builder(ctx).okHttpClient(client.http).crossfade(true).build()
-    }
+    // 封面/页面图片走加密缓存（AES-GCM + Android KeyStore），列表缓存优先
+    val imageLoader = remember(client) { buildKomgaImageLoader(ctx, client) }
 
     CompositionLocalProvider(LocalImageLoader provides imageLoader) {
         val stack = remember { mutableStateListOf<KomgaRoute>(KomgaRoute.Home) }
@@ -257,7 +255,7 @@ private fun KomgaHome(client: KomgaClient, onNavigate: (KomgaRoute) -> Unit) {
                                     .clip(RoundedCornerShape(12.dp))
                             ) {
                                 AsyncImage(
-                                    model = client.readListThumbUrl(rl.id),
+                                    model = SecureImage(client.readListThumbUrl(rl.id)),
                                     contentDescription = rl.name,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
@@ -395,7 +393,7 @@ private fun CoverCard(
                 .clip(RoundedCornerShape(12.dp))
         ) {
             AsyncImage(
-                model = imageUrl,
+                model = SecureImage(imageUrl),
                 contentDescription = title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
@@ -540,7 +538,7 @@ private fun SeriesGridCard(
                 .clip(RoundedCornerShape(12.dp))
         ) {
             AsyncImage(
-                model = client.seriesThumbUrl(s.id),
+                model = SecureImage(client.seriesThumbUrl(s.id)),
                 contentDescription = s.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
@@ -576,6 +574,8 @@ private fun SeriesGridCard(
 
 @Composable
 private fun KomgaSeriesDetail(client: KomgaClient, seriesId: String) {
+    val ctx = LocalContext.current
+    val imageLoader = LocalImageLoader.current
     var books by remember { mutableStateOf<List<KomgaBook>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var addToListBook by remember { mutableStateOf<KomgaBook?>(null) }
@@ -586,6 +586,18 @@ private fun KomgaSeriesDetail(client: KomgaClient, seriesId: String) {
             books = client.seriesBooks(seriesId)
         } catch (e: Exception) {
             error = e.message
+        }
+    }
+
+    // 进入详情后，后台强制联网刷新一次封面并更新加密缓存（列表页仍用缓存展示）
+    LaunchedEffect(books?.size) {
+        val list = books ?: return@LaunchedEffect
+        list.take(30).forEach { b ->
+            imageLoader.enqueue(
+                ImageRequest.Builder(ctx)
+                    .data(SecureImage(client.bookThumbUrl(b.id), refresh = true))
+                    .build()
+            )
         }
     }
 
@@ -671,7 +683,7 @@ private fun BookRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             AsyncImage(
-                model = client.bookThumbUrl(book.id),
+                model = SecureImage(client.bookThumbUrl(book.id)),
                 contentDescription = book.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.size(56.dp, 80.dp).clip(RoundedCornerShape(8.dp))

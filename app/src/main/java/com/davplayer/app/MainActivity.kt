@@ -342,13 +342,12 @@ fun HistoryScreen() {
     val comics = remember(resumeTick) { comicStore.list() }
     val fmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
 
-    // 漫画封面走带认证的 Coil 加载器
-    val komgaLoader = remember {
+    // 漫画封面：加密缓存 + 认证（AES-GCM + Android KeyStore）
+    val komgaClient = remember {
         if (settings.komgaUrl.isBlank()) null
-        else ImageLoader.Builder(ctx)
-            .okHttpClient(KomgaClient(settings.komgaUrl, settings.komgaUser, settings.komgaPass).http)
-            .build()
+        else KomgaClient(settings.komgaUrl, settings.komgaUser, settings.komgaPass)
     }
+    val komgaLoader = remember { komgaClient?.let { buildKomgaImageLoader(ctx, it) } }
 
     Column(Modifier.fillMaxSize()) {
         SingleChoiceSegmentedButtonRow(
@@ -447,12 +446,9 @@ fun HistoryScreen() {
                                     .padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                if (komgaLoader != null) {
+                                if (komgaLoader != null && komgaClient != null) {
                                     AsyncImage(
-                                        model = komgaLoader.let {
-                                            KomgaClient(settings.komgaUrl, settings.komgaUser, settings.komgaPass)
-                                                .bookThumbUrl(item.bookId)
-                                        },
+                                        model = SecureImage(komgaClient.bookThumbUrl(item.bookId)),
                                         contentDescription = item.title,
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.size(63.dp, 90.dp).clip(RoundedCornerShape(6.dp))
