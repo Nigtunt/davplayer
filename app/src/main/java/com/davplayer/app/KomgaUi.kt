@@ -163,7 +163,10 @@ private fun KomgaTopBar(
         title = {
             Text(
                 title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.5).sp
+                )
             )
         },
         navigationIcon = {
@@ -180,8 +183,9 @@ private fun KomgaTopBar(
                 )
             }
         },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
     )
+    HorizontalDivider(color = davExtra().hairline, thickness = 1.dp)
 }
 
 // ---------------- 首页（书架） ----------------
@@ -362,7 +366,8 @@ private fun KomgaHome(client: KomgaClient, state: KomgaHomeState, onNavigate: (K
                         .padding(horizontal = 16.dp, vertical = 4.dp)
                         .clickable { onNavigate(KomgaRoute.SeriesList(lib.id, lib.name)) },
                     shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, davExtra().hairline)
                 ) {
                     Row(
                         Modifier.padding(horizontal = 16.dp, vertical = 18.dp),
@@ -433,10 +438,10 @@ private fun SectionHeader(title: String) {
     Text(
         title,
         style = MaterialTheme.typography.titleMedium.copy(
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.5.sp
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = (-0.2).sp
         ),
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
     )
 }
@@ -481,12 +486,21 @@ private fun CoverCard(
                     )
             )
             if (progress > 0f) {
-                LinearProgressIndicator(
-                    progress = { progress.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).height(3.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = Color.White.copy(alpha = 0.25f)
-                )
+                // 底部观看进度（品牌渐变）
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(Color.White.copy(alpha = 0.25f))
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(progress.coerceIn(0f, 1f))
+                            .fillMaxHeight()
+                            .background(DavTheme.BrandGradient)
+                    )
+                }
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -624,12 +638,20 @@ private fun SeriesGridCard(
                 )
             }
             if (s.readProgress > 0f) {
-                LinearProgressIndicator(
-                    progress = { s.readProgress },
-                    modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).height(3.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = Color.White.copy(alpha = 0.25f)
-                )
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(Color.White.copy(alpha = 0.25f))
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(s.readProgress.coerceIn(0f, 1f))
+                            .fillMaxHeight()
+                            .background(DavTheme.BrandGradient)
+                    )
+                }
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -753,7 +775,8 @@ private fun BookRow(
             .fillMaxWidth()
             .clickable { startReader(ctx, book.id, book.title, book.readPage, book.seriesTitle) },
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = androidx.compose.foundation.BorderStroke(1.dp, davExtra().hairline)
     ) {
         Row(
             Modifier.padding(10.dp),

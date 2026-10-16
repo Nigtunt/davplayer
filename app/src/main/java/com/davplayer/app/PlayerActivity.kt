@@ -18,6 +18,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Folder
@@ -30,6 +32,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
@@ -123,7 +128,7 @@ class PlayerActivity : ComponentActivity() {
         exo.playWhenReady = true
 
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            DavThemeProvider(dark = true) {
                 PlayerScreen(
                     player = exo,
                     client = client,
@@ -186,6 +191,7 @@ class PlayerActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(
     player: ExoPlayer,
@@ -344,8 +350,9 @@ fun PlayerScreen(
             val dur = durationMs.value
             Surface(
                 modifier = Modifier.align(Alignment.Center),
-                color = Color.Black.copy(alpha = 0.65f),
-                shape = MaterialTheme.shapes.medium
+                color = Color(0xEB0F0F0F),
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.5.dp, Color.White.copy(alpha = 0.25f))
             ) {
                 Text(
                     "${formatMs(target)} / ${formatMs(dur)}",
@@ -364,10 +371,10 @@ fun PlayerScreen(
             Surface(
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp),
                 color = Color.Black.copy(alpha = 0.6f),
-                shape = MaterialTheme.shapes.medium
+                shape = RoundedCornerShape(999.dp)
             ) {
                 Text(
-                    "${"%.1f".format(settings.longPressSpeed)}x 播放中",
+                    "⚡ ${"%.1f".format(settings.longPressSpeed)}x 播放中",
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     color = Color.White
                 )
@@ -384,8 +391,13 @@ fun PlayerScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.5f))
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Black.copy(alpha = 0.75f), Color.Transparent)
+                        )
+                    )
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                    .padding(bottom = 20.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack) {
@@ -421,8 +433,14 @@ fun PlayerScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.5f))
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                        )
+                    )
+                    .padding(top = 28.dp)
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 4.dp)
             ) {
                 var dragging by remember { mutableStateOf(false) }
                 var dragValue by remember { mutableStateOf(0f) }
@@ -430,6 +448,7 @@ fun PlayerScreen(
                 val sliderValue = if (dragging) dragValue
                 else positionMs.value.toFloat().coerceIn(0f, dur.toFloat().coerceAtLeast(1f))
 
+                // 品牌渐变进度条 + 白色圆点滑块
                 Slider(
                     value = sliderValue,
                     valueRange = 0f..dur.toFloat().coerceAtLeast(1f),
@@ -437,6 +456,35 @@ fun PlayerScreen(
                     onValueChangeFinished = {
                         player.seekTo(dragValue.toLong())
                         dragging = false
+                    },
+                    thumb = {
+                        Box(
+                            Modifier
+                                .size(13.dp)
+                                .shadow(4.dp, CircleShape)
+                                .clip(CircleShape)
+                                .background(Color.White)
+                        )
+                    },
+                    track = { sliderState ->
+                        val range = sliderState.valueRange.endInclusive - sliderState.valueRange.start
+                        val fraction = if (range > 0f)
+                            ((sliderState.value - sliderState.valueRange.start) / range).coerceIn(0f, 1f)
+                        else 0f
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(Color.White.copy(alpha = 0.28f))
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(fraction)
+                                    .fillMaxHeight()
+                                    .background(DavTheme.BrandGradient)
+                            )
+                        }
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -461,15 +509,24 @@ fun PlayerScreen(
                     IconButton(onClick = { showSubtitlePicker.value = true }) {
                         Icon(Icons.Default.Subtitles, "选择字幕", tint = Color.White)
                     }
-                    // 倍速
-                    TextButton(onClick = {
-                        val cur = baseSpeed.value
-                        val idx = speedPresets.indexOfFirst { it >= cur - 0.001f }
-                        val next = speedPresets[(idx + 1) % speedPresets.size]
-                        baseSpeed.value = next
-                        if (!boosting.value) player.setPlaybackSpeed(next)
-                    }) {
-                        Text("${"%.2g".format(baseSpeed.value)}x", color = Color.White)
+                    // 倍速胶囊
+                    Surface(
+                        onClick = {
+                            val cur = baseSpeed.value
+                            val idx = speedPresets.indexOfFirst { it >= cur - 0.001f }
+                            val next = speedPresets[(idx + 1) % speedPresets.size]
+                            baseSpeed.value = next
+                            if (!boosting.value) player.setPlaybackSpeed(next)
+                        },
+                        color = Color.White.copy(alpha = 0.18f),
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Text(
+                            "${"%.2g".format(baseSpeed.value)}x",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
                     }
                     // 全屏
                     IconButton(onClick = { activity.setFullscreen(!fullscreen.value) }) {

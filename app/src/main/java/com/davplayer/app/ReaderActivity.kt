@@ -68,7 +68,7 @@ class ReaderActivity : ComponentActivity() {
 
         setContent {
             // 阅读器始终深色
-            MaterialTheme(colorScheme = DavTheme.DarkColors) {
+            DavThemeProvider(dark = true) {
                 ReaderScreen(
                     client = client,
                     bookId = bookId,
@@ -316,9 +316,14 @@ private fun ReaderContent(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.65f))
+                        .background(
+                            androidx.compose.ui.graphics.Brush.verticalGradient(
+                                listOf(Color.Black.copy(alpha = 0.75f), Color.Transparent)
+                            )
+                        )
                         .statusBarsPadding()
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                        .padding(horizontal = 4.dp, vertical = 4.dp)
+                        .padding(bottom = 20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onBack) {
@@ -351,9 +356,15 @@ private fun ReaderContent(
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.65f))
+                        .background(
+                            androidx.compose.ui.graphics.Brush.verticalGradient(
+                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                            )
+                        )
                         .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .padding(top = 28.dp)
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 8.dp)
                 ) {
                     Text(
                         "第 ${(sliderDrag?.roundToInt() ?: (currentPage.value + 1))} / $pageCount 页",
@@ -368,6 +379,11 @@ private fun ReaderContent(
                             sliderDrag?.let { jumpTo(it.roundToInt() - 1) }
                             sliderDrag = null
                         },
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color.White,
+                            activeTrackColor = DavTheme.Accent,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.28f)
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
