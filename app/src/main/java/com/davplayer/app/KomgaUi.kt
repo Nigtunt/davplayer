@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -33,15 +34,60 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.compose.LocalImageLoader
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
+
+/** 生命周期 ON_RESUME 时执行（用于从阅读器返回后单独更新进度） */
+@Composable
+private fun OnResume(action: () -> Unit) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val current by rememberUpdatedState(action)
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) current()
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+}
+
+/** 用本地漫画历史单独刷新书籍进度（不发网络请求） */
+private fun patchBooksFromLocal(list: List<KomgaBook>?, store: ComicHistoryStore): List<KomgaBook>? =
+    list?.map { b ->
+        val h = store.get(b.id)
+        if (h != null && h.page != b.readPage) {
+            b.copy(readPage = h.page, readCompleted = h.page >= h.pagesCount)
+        } else b
+    }
+
+/** 书架首页数据：提升到路由层保存，返回首页不重取 */
+class KomgaHomeState {
+    var libraries by mutableStateOf<List<KomgaLibrary>?>(null)
+    var onDeck by mutableStateOf<List<KomgaBook>?>(null)
+    var latest by mutableStateOf<List<KomgaSeries>?>(null)
+    var readLists by mutableStateOf<List<KomgaReadList>?>(null)
+    var loaded by mutableStateOf(false)
+}
+
+/** 系列列表数据：按书库保存，从详情返回不重取、滚动位置不丢 */
+class KomgaSeriesListState {
+    var items by mutableStateOf<List<KomgaSeries>>(emptyList())
+    var page = 0
+    var isLast = false
+    var searchQuery by mutableStateOf("")
+    var loaded = false
+    val gridState = LazyGridState()
+}
 
 sealed interface KomgaRoute {
     data object Home : KomgaRoute
@@ -69,6 +115,10 @@ fun KomgaScreen(settings: Settings, dark: Boolean, onToggleTheme: () -> Unit) {
         val stack = remember { mutableStateListOf<KomgaRoute>(KomgaRoute.Home) }
         BackHandler(stack.size > 1) { stack.removeAt(stack.size - 1) }
 
+        // 提升到路由层的状态：路由切换不丢，返回时不重新请求
+        val homeState = remember(client) { KomgaHomeState() }
+        val seriesListStates = remember(client) { mutableMapOf<String, KomgaSeriesListState>() }
+
         Column(Modifier.fillMaxSize()) {
             val route = stack.last()
             KomgaTopBar(
@@ -84,9 +134,12 @@ fun KomgaScreen(settings: Settings, dark: Boolean, onToggleTheme: () -> Unit) {
                 onToggleTheme = onToggleTheme
             )
             when (val r = route) {
-                is KomgaRoute.Home -> KomgaHome(client) { stack.add(it) }
-                is KomgaRoute.SeriesList -> KomgaSeriesList(client, r.libraryId) { id, t ->
-                    stack.add(KomgaRoute.SeriesDetail(id, t))
+                is KomgaRoute.Home -> KomgaHome(client, homeState) { stack.add(it) }
+                is KomgaRoute.SeriesList -> {
+                    val st = seriesListStates.getOrPut(r.libraryId ?: "all") { KomgaSeriesListState() }
+                    KomgaSeriesList(client, r.libraryId, st) { id, t ->
+                        stack.add(KomgaRoute.SeriesDetail(id, t))
+                    }
                 }
                 is KomgaRoute.SeriesDetail -> KomgaSeriesDetail(client, r.id)
                 is KomgaRoute.ReadListDetail -> KomgaReadListDetail(client, r.id, r.title) {
@@ -134,27 +187,31 @@ private fun KomgaTopBar(
 // ---------------- 首页（书架） ----------------
 
 @Composable
-private fun KomgaHome(client: KomgaClient, onNavigate: (KomgaRoute) -> Unit) {
-    var libraries by remember { mutableStateOf<List<KomgaLibrary>?>(null) }
-    var onDeck by remember { mutableStateOf<List<KomgaBook>?>(null) }
-    var latest by remember { mutableStateOf<List<KomgaSeries>?>(null) }
-    var readLists by remember { mutableStateOf<List<KomgaReadList>?>(null) }
+private fun KomgaHome(client: KomgaClient, state: KomgaHomeState, onNavigate: (KomgaRoute) -> Unit) {
+    val ctx = LocalContext.current
+    val comicStore = remember { ComicHistoryStore(ctx) }
     var error by remember { mutableStateOf<String?>(null) }
-    var refreshTick by remember { mutableStateOf(0) }
     var showCreateList by remember { mutableStateOf(false) }
     var listActionMsg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(refreshTick) {
-        error = null
+    // 首次进入才联网加载；从详情/阅读器返回直接用已有数据
+    LaunchedEffect(Unit) {
+        if (state.loaded) return@LaunchedEffect
         try {
-            libraries = client.libraries()
-            onDeck = client.onDeck()
-            latest = client.latestSeries()
-            readLists = client.readLists()
+            state.libraries = client.libraries()
+            state.onDeck = client.onDeck()
+            state.latest = client.latestSeries()
+            state.readLists = client.readLists()
+            state.loaded = true
         } catch (e: Exception) {
             error = e.message
         }
+    }
+
+    // 从阅读器返回：只用本地记录单独更新「继续阅读」的进度
+    OnResume {
+        if (state.loaded) state.onDeck = patchBooksFromLocal(state.onDeck, comicStore)
     }
 
     if (error != null) {
@@ -162,7 +219,20 @@ private fun KomgaHome(client: KomgaClient, onNavigate: (KomgaRoute) -> Unit) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("连接失败：$error", color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(12.dp))
-                Button(onClick = { refreshTick++ }) { Text("重试") }
+                Button(onClick = {
+                    error = null
+                    scope.launch {
+                        try {
+                            state.libraries = client.libraries()
+                            state.onDeck = client.onDeck()
+                            state.latest = client.latestSeries()
+                            state.readLists = client.readLists()
+                            state.loaded = true
+                        } catch (e: Exception) {
+                            error = e.message
+                        }
+                    }
+                }) { Text("重试") }
             }
         }
         return
@@ -174,7 +244,7 @@ private fun KomgaHome(client: KomgaClient, onNavigate: (KomgaRoute) -> Unit) {
     ) {
         item { Spacer(Modifier.height(4.dp)) }
 
-        val deck = onDeck.orEmpty()
+        val deck = state.onDeck.orEmpty()
         if (deck.isNotEmpty()) {
             item { SectionHeader("继续阅读") }
             item {
@@ -195,7 +265,7 @@ private fun KomgaHome(client: KomgaClient, onNavigate: (KomgaRoute) -> Unit) {
             }
         }
 
-        val latestList = latest.orEmpty()
+        val latestList = state.latest.orEmpty()
         if (latestList.isNotEmpty()) {
             item { Spacer(Modifier.height(20.dp)); SectionHeader("最新入库") }
             item {
@@ -226,7 +296,7 @@ private fun KomgaHome(client: KomgaClient, onNavigate: (KomgaRoute) -> Unit) {
             }
         }
 
-        val lists = readLists.orEmpty()
+        val lists = state.readLists.orEmpty()
         if (lists.isEmpty()) {
             item {
                 Text(
@@ -281,7 +351,7 @@ private fun KomgaHome(client: KomgaClient, onNavigate: (KomgaRoute) -> Unit) {
 
         item { Spacer(Modifier.height(20.dp)); SectionHeader("书库") }
 
-        val libs = libraries
+        val libs = state.libraries
         if (libs == null) {
             item { Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
         } else {
@@ -344,7 +414,7 @@ private fun KomgaHome(client: KomgaClient, onNavigate: (KomgaRoute) -> Unit) {
                             client.createReadList(name.trim())
                             showCreateList = false
                             listActionMsg = "✓ 已创建「${name.trim()}」"
-                            refreshTick++
+                            state.readLists = client.readLists()
                         } catch (e: Exception) {
                             err = e.message
                         }
@@ -434,35 +504,38 @@ private fun CoverCard(
 private fun KomgaSeriesList(
     client: KomgaClient,
     libraryId: String?,
+    state: KomgaSeriesListState,
     onOpenSeries: (String, String) -> Unit
 ) {
-    var items by remember { mutableStateOf<List<KomgaSeries>>(emptyList()) }
-    var page by remember { mutableStateOf(0) }
-    var isLast by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var search by remember { mutableStateOf("") }
-    var searchQuery by remember { mutableStateOf("") }
-    val gridState = rememberLazyGridState()
+    var search by remember { mutableStateOf(state.searchQuery) }
+    val scope = rememberCoroutineScope()
+    val gridState = state.gridState
 
-    suspend fun load(reset: Boolean) {
+    fun load(reset: Boolean) {
         if (loading) return
-        loading = true
-        try {
-            val p = if (reset) 0 else page
-            val r = client.series(page = p, libraryId = libraryId, search = searchQuery.ifBlank { null })
-            items = if (reset) r.items else items + r.items
-            isLast = r.isLast
-            page = p + 1
-        } catch (e: Exception) {
-            error = e.message
+        scope.launch {
+            loading = true
+            try {
+                val p = if (reset) 0 else state.page
+                val r = client.series(page = p, libraryId = libraryId, search = state.searchQuery.ifBlank { null })
+                state.items = if (reset) r.items else state.items + r.items
+                state.isLast = r.isLast
+                state.page = p + 1
+            } catch (e: Exception) {
+                error = e.message
+            }
+            loading = false
         }
-        loading = false
     }
 
-    LaunchedEffect(searchQuery) {
-        page = 0
-        load(reset = true)
+    // 仅首次进入加载；从详情返回直接用已有数据和滚动位置
+    LaunchedEffect(Unit) {
+        if (!state.loaded) {
+            state.loaded = true
+            load(reset = true)
+        }
     }
 
     // 滚动到底自动加载下一页
@@ -474,7 +547,7 @@ private fun KomgaSeriesList(
         }
     }
     LaunchedEffect(shouldLoadMore) {
-        if (shouldLoadMore && !isLast && !loading) load(reset = false)
+        if (shouldLoadMore && !state.isLast && !loading) load(reset = false)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -486,18 +559,18 @@ private fun KomgaSeriesList(
             shape = RoundedCornerShape(24.dp),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             trailingIcon = {
-                TextButton(onClick = { searchQuery = search }) { Text("搜索") }
+                TextButton(onClick = { state.searchQuery = search; load(reset = true) }) { Text("搜索") }
             }
         )
 
-        if (items.isEmpty() && loading) {
+        if (state.items.isEmpty() && loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        } else if (items.isEmpty() && error != null) {
+        } else if (state.items.isEmpty() && error != null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("加载失败：$error", color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(12.dp))
-                    Button(onClick = { page = 0; /* retry */ searchQuery = searchQuery }) { Text("重试") }
+                    Button(onClick = { load(reset = true) }) { Text("重试") }
                 }
             }
         } else {
@@ -509,10 +582,10 @@ private fun KomgaSeriesList(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(items, key = { it.id }) { s ->
+                items(state.items, key = { it.id }) { s ->
                     SeriesGridCard(client, s, onOpenSeries)
                 }
-                if (!isLast) {
+                if (!state.isLast) {
                     item {
                         Box(Modifier.padding(16.dp), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
@@ -576,6 +649,7 @@ private fun SeriesGridCard(
 private fun KomgaSeriesDetail(client: KomgaClient, seriesId: String) {
     val ctx = LocalContext.current
     val imageLoader = LocalImageLoader.current
+    val comicStore = remember { ComicHistoryStore(ctx) }
     var books by remember { mutableStateOf<List<KomgaBook>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var addToListBook by remember { mutableStateOf<KomgaBook?>(null) }
@@ -583,11 +657,14 @@ private fun KomgaSeriesDetail(client: KomgaClient, seriesId: String) {
 
     LaunchedEffect(seriesId) {
         try {
-            books = client.seriesBooks(seriesId)
+            books = patchBooksFromLocal(client.seriesBooks(seriesId), comicStore)
         } catch (e: Exception) {
             error = e.message
         }
     }
+
+    // 从阅读器返回：只用本地记录单独更新刚读那本的进度，不重取列表
+    OnResume { books = patchBooksFromLocal(books, comicStore) }
 
     // 进入详情后，后台强制联网刷新一次封面并更新加密缓存（列表页仍用缓存展示）
     LaunchedEffect(books?.size) {
@@ -728,6 +805,8 @@ private fun KomgaReadListDetail(
     title: String,
     onDeleted: () -> Unit
 ) {
+    val ctx = LocalContext.current
+    val comicStore = remember { ComicHistoryStore(ctx) }
     var books by remember { mutableStateOf<List<KomgaBook>?>(null) }
     var bookIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -740,11 +819,14 @@ private fun KomgaReadListDetail(
         error = null
         try {
             bookIds = client.readLists().firstOrNull { it.id == readListId }?.bookIds ?: emptyList()
-            books = client.readListBooks(readListId)
+            books = patchBooksFromLocal(client.readListBooks(readListId), comicStore)
         } catch (e: Exception) {
             error = e.message
         }
     }
+
+    // 从阅读器返回：只用本地记录单独更新进度
+    OnResume { books = patchBooksFromLocal(books, comicStore) }
 
     Column(Modifier.fillMaxSize()) {
         Row(

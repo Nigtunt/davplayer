@@ -174,10 +174,33 @@ fun BrowseScreen(settings: Settings, sourcesVersion: Int) {
     var sourceMenuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    // 目录列表内存缓存：返回上级/重进目录直接用缓存，不重新请求
+    val listCache = remember(source.id) { mutableMapOf<String, List<DavEntry>>() }
+
+    // 从播放器返回时单独刷新封面（播放中可能刚生成了封面）
+    var resumeTick by remember { mutableStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) resumeTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
     LaunchedEffect(path, refreshTick) {
+        val cached = listCache[path]
+        if (cached != null) {
+            entries = cached
+            error = null
+            settings.lastPath = path
+            return@LaunchedEffect
+        }
         loading = true; error = null
         try {
-            entries = client.list(path)
+            val list = client.list(path)
+            listCache[path] = list
+            entries = list
             settings.lastPath = path
         } catch (e: Exception) {
             error = e.message ?: "加载失败"
@@ -234,7 +257,7 @@ fun BrowseScreen(settings: Settings, sourcesVersion: Int) {
                         }
                     }
                 }
-                IconButton(onClick = { refreshTick++ }) {
+                IconButton(onClick = { listCache.remove(path); refreshTick++ }) {
                     Icon(Icons.Default.Refresh, "刷新")
                 }
             }
@@ -261,7 +284,7 @@ fun BrowseScreen(settings: Settings, sourcesVersion: Int) {
                         ListItem(
                             leadingContent = {
                                 if (!entry.isDir) {
-                                    FileCover(historyStore, entry.href)
+                                    FileCover(historyStore, entry.href, resumeTick)
                                 } else {
                                     Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
                                 }
@@ -296,8 +319,8 @@ fun BrowseScreen(settings: Settings, sourcesVersion: Int) {
 
 /** 文件列表中的封面缩略图：已有封面才显示，否则显示默认图标 */
 @Composable
-fun FileCover(store: HistoryStore, href: String) {
-    val bitmap by produceState<ImageBitmap?>(null, href) {
+fun FileCover(store: HistoryStore, href: String, tick: Int = 0) {
+    val bitmap by produceState<ImageBitmap?>(null, href, tick) {
         value = withContext(Dispatchers.IO) {
             val f = store.coverFile(href)
             if (f.exists()) BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() else null
@@ -813,6 +836,24 @@ fun SettingsScreen(
             }
             Text(
                 "长按屏幕任意位置临时加速，松开恢复正常速度。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        item {
+            var decodeMode by remember { mutableStateOf(settings.decodeMode) }
+            Text("解码方式", style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("hw" to "硬件优先（默认）", "sw" to "软件优先").forEach { (m, label) ->
+                    FilterChip(
+                        selected = decodeMode == m,
+                        onClick = { decodeMode = m; settings.decodeMode = m },
+                        label = { Text(label) }
+                    )
+                }
+            }
+            Text(
+                "部分视频（如 10bit H.264）硬解卡顿时，切换软件优先可修复；重新打开视频生效",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

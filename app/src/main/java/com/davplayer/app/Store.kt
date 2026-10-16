@@ -81,6 +81,11 @@ class Settings(ctx: Context) {
         get() = sp.getFloat("longPressSpeed", 2.0f)
         set(v) = sp.edit().putFloat("longPressSpeed", v).apply()
 
+    /** 解码方式："hw" 硬件优先（默认）| "sw" 软件优先（修复部分视频硬解卡顿） */
+    var decodeMode: String
+        get() = sp.getString("decodeMode", "hw") ?: "hw"
+        set(v) = sp.edit().putString("decodeMode", v).apply()
+
     /** 上次浏览的目录 */
     var lastPath: String?
         get() = sp.getString("lastPath", null)

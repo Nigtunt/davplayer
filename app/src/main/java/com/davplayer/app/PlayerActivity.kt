@@ -13,10 +13,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -45,7 +43,10 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import kotlinx.coroutines.Dispatchers
@@ -95,7 +96,24 @@ class PlayerActivity : ComponentActivity() {
         val dataSourceFactory = OkHttpDataSource.Factory(
             OkHttpClient.Builder().addInterceptor(HttpLogInterceptor()).build()
         ).setDefaultRequestProperties(headers)
-        val exo = ExoPlayer.Builder(this)
+
+        // 解码模式：软件优先可修复部分视频（如 10bit H.264）硬解卡顿
+        val renderersFactory = DefaultRenderersFactory(this).apply {
+            if (settings.decodeMode == "sw") {
+                setMediaCodecSelector { mimeType, requiresSecure, requiresTunneling ->
+                    MediaCodecSelector.DEFAULT
+                        .getDecoderInfos(mimeType, requiresSecure, requiresTunneling)
+                        .sortedByDescending { it.softwareOnly }
+                }
+            }
+        }
+        // 加大缓冲，对抗 WebDAV 网络抖动
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15_000, 60_000, 2_500, 5_000)
+            .build()
+
+        val exo = ExoPlayer.Builder(this, renderersFactory)
+            .setLoadControl(loadControl)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .build()
         player = exo
@@ -273,26 +291,70 @@ fun PlayerScreen(
             modifier = Modifier.align(Alignment.Center).fillMaxSize()
         )
 
-        // 手势层：点击切换控制栏，长按临时倍速
+        // 手势层：点击切换控制栏，长按临时倍速，横向拖动调整进度
+        val seekPreview = remember { mutableStateOf<Long?>(null) }
         Box(
             Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        val longPress = awaitLongPressOrCancellation(down.id)
-                        if (longPress != null) {
+                    detectTapGestures(
+                        onTap = { controlsVisible.value = !controlsVisible.value },
+                        onLongPress = {
                             boosting.value = true
                             player.setPlaybackSpeed(settings.longPressSpeed)
-                            waitForUpOrCancellation()
-                            player.setPlaybackSpeed(baseSpeed.value)
-                            boosting.value = false
-                        } else {
-                            controlsVisible.value = !controlsVisible.value
+                        },
+                        onPress = {
+                            // 长按被打断（松手或开始拖动）时恢复速度
+                            awaitRelease()
+                            if (boosting.value) {
+                                player.setPlaybackSpeed(baseSpeed.value)
+                                boosting.value = false
+                            }
                         }
-                    }
+                    )
+                }
+                .pointerInput(Unit) {
+                    var targetPos = 0L
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            targetPos = player.currentPosition
+                            seekPreview.value = targetPos
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            val dur = player.duration
+                            if (dur > 0) {
+                                // 拖满一屏宽度 ≈ 前进/后退 120 秒
+                                val deltaMs = (dragAmount / size.width * 120_000).toLong()
+                                targetPos = (targetPos + deltaMs).coerceIn(0, dur)
+                                seekPreview.value = targetPos
+                            }
+                        },
+                        onDragEnd = {
+                            player.seekTo(targetPos)
+                            seekPreview.value = null
+                        },
+                        onDragCancel = { seekPreview.value = null }
+                    )
                 }
         )
+
+        // 拖动进度预览
+        seekPreview.value?.let { target ->
+            val dur = durationMs.value
+            Surface(
+                modifier = Modifier.align(Alignment.Center),
+                color = Color.Black.copy(alpha = 0.65f),
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Text(
+                    "${formatMs(target)} / ${formatMs(dur)}",
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+        }
 
         if (isBuffering.value) {
             CircularProgressIndicator(Modifier.align(Alignment.Center))
