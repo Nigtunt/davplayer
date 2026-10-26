@@ -46,6 +46,15 @@ base64 -i keystore/davplayer.jks | tr -d '\n' # macOS
 CI 在构建前把 `KEYSTORE_BASE64` 解码回 `keystore/davplayer.jks`，密码通过环境变量
 `DAV_STORE_PASSWORD` / `DAV_KEY_ALIAS` / `DAV_KEY_PASSWORD` 传给 Gradle。
 
+也可以直接用 gh CLI 一次配齐（注意：一定要用 `--body`，用管道会带 CRLF 换行，导致 CI 里 `base64 -d` 报 invalid input）：
+
+```powershell
+gh secret set KEYSTORE_BASE64 --body ([Convert]::ToBase64String([IO.File]::ReadAllBytes("D:\project\davplayer\keystore\davplayer.jks")))
+gh secret set KEYSTORE_PASSWORD --body "davplayer"
+gh secret set KEY_ALIAS --body "davplayer"
+gh secret set KEY_PASSWORD --body "davplayer"
+```
+
 ### 1.3 换机器 / 换协作者（重要）
 
 GitHub Secrets **只能写入、不能读回**。所以密钥一定要自己另存一份，否则换台电脑就再也拿不到同一把钥匙了。

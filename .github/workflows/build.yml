@@ -31,7 +31,8 @@ jobs:
             exit 1
           fi
           mkdir -p keystore
-          printf '%s' "$KEYSTORE_BASE64" | base64 -d > keystore/davplayer.jks
+          # 去掉可能存在的换行/空白（不同方式写入 secret 时容易带 \r\n）
+          printf '%s' "$KEYSTORE_BASE64" | tr -d ' \r\n\t' | base64 -d > keystore/davplayer.jks
           test -s keystore/davplayer.jks
 
       # 出 release 包（非 debuggable、体积更小），debug 包仅本地调试用
