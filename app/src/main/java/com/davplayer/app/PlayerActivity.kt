@@ -1,6 +1,9 @@
 package com.davplayer.app
 
+import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
@@ -37,6 +40,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -45,6 +50,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -87,6 +93,11 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 进来时手机已经是横屏（例如先横过来再点视频）：直接沉浸式
+        val startLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        fullscreen.value = startLandscape
+        applyImmersive(startLandscape)
+
         val href = intent.getStringExtra(EXTRA_HREF) ?: run { finish(); return }
         val title = intent.getStringExtra(EXTRA_TITLE) ?: href.substringAfterLast('/')
         val startPos = intent.getLongExtra(EXTRA_POSITION, 0L)
@@ -97,6 +108,10 @@ class PlayerActivity : ComponentActivity() {
         val client = WebDavClient(source.url, source.user, source.pass)
         val url = client.fileUrl(href)
         val headers = client.authHeaders()
+
+        // RMVB / WMV 等容器 Media3 没有对应解封装器，先给出明确提示，
+        // 不再发无意义的请求，避免界面一直卡在缓冲转圈
+        val unsupported = isUnsupportedVideo(title.ifBlank { href })
 
         val dataSourceFactory = OkHttpDataSource.Factory(
             OkHttpClient.Builder().addInterceptor(HttpLogInterceptor()).build()
@@ -122,10 +137,12 @@ class PlayerActivity : ComponentActivity() {
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .build()
         player = exo
-        exo.setMediaItem(MediaItem.fromUri(url))
-        exo.prepare()
-        if (startPos > 0) exo.seekTo(startPos)
-        exo.playWhenReady = true
+        if (!unsupported) {
+            exo.setMediaItem(MediaItem.fromUri(url))
+            exo.prepare()
+            if (startPos > 0) exo.seekTo(startPos)
+            exo.playWhenReady = true
+        }
 
         setContent {
             DavThemeProvider(dark = true) {
@@ -138,6 +155,15 @@ class PlayerActivity : ComponentActivity() {
                     settings = settings,
                     surfaceRefs = surfaceRefs,
                     fullscreen = fullscreen,
+                    initialError = if (unsupported) unsupportedMessage(title.ifBlank { href }) else null,
+                    canRetry = !unsupported,
+                    onOpenExternal = {
+                        if (!openWithExternalPlayer(this, client.fileUrlWithCredentials(href), title)) {
+                            android.widget.Toast.makeText(
+                                this, "没有找到可用的外部播放器", android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
                     onBack = { finish() },
                     saveHistory = {
                         val dur = exo.duration
@@ -168,19 +194,38 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    fun setFullscreen(fs: Boolean) {
-        fullscreen.value = fs
+    /** 只负责系统栏的显隐（沉浸式），不改变屏幕方向 */
+    private fun applyImmersive(hide: Boolean) {
         val controller = WindowCompat.getInsetsController(window, window.decorView)
-        if (fs) {
-            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        if (hide) {
             WindowCompat.setDecorFitsSystemWindows(window, false)
             controller.hide(WindowInsetsCompat.Type.systemBars())
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         } else {
-            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
             WindowCompat.setDecorFitsSystemWindows(window, true)
             controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // 物理旋转手机：横屏自动进入全屏（隐藏状态栏/导航栏），转回竖屏恢复
+        val landscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
+        fullscreen.value = landscape
+        applyImmersive(landscape)
+    }
+
+    fun setFullscreen(fs: Boolean) {
+        fullscreen.value = fs
+        if (fs) {
+            // 点全屏按钮：锁横屏 + 沉浸式
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            applyImmersive(true)
+        } else {
+            // 退出全屏：解除方向锁，恢复系统栏（当前是横屏就保持横屏）
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+            applyImmersive(false)
         }
     }
 
@@ -202,6 +247,9 @@ fun PlayerScreen(
     settings: Settings,
     surfaceRefs: SurfaceRefs,
     fullscreen: State<Boolean>,
+    initialError: String? = null,
+    canRetry: Boolean = true,
+    onOpenExternal: () -> Unit = {},
     onBack: () -> Unit,
     saveHistory: () -> Unit,
     ensureCover: suspend () -> Unit
@@ -209,8 +257,9 @@ fun PlayerScreen(
     val scope = rememberCoroutineScope()
     val activity = androidx.compose.ui.platform.LocalContext.current as PlayerActivity
 
+    val errorMsg = remember { mutableStateOf(initialError) }
     val isPlaying = remember { mutableStateOf(false) }
-    val isBuffering = remember { mutableStateOf(true) }
+    val isBuffering = remember { mutableStateOf(initialError == null) }
     val positionMs = remember { mutableStateOf(0L) }
     val durationMs = remember { mutableStateOf(0L) }
     val controlsVisible = remember { mutableStateOf(true) }
@@ -236,10 +285,17 @@ fun PlayerScreen(
             }
 
             override fun onPlaybackStateChanged(state: Int) {
-                isBuffering.value = state == Player.STATE_BUFFERING
+                if (errorMsg.value == null) isBuffering.value = state == Player.STATE_BUFFERING
                 if (state == Player.STATE_READY) {
                     durationMs.value = player.duration.coerceAtLeast(0)
                 }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                // 出错了就停下来给出原因，不再无限转圈
+                AppLog.log("PLAYER", "播放失败 ${error.errorCodeName}: ${error.message}")
+                isBuffering.value = false
+                errorMsg.value = describePlaybackError(error)
             }
 
             override fun onVideoSizeChanged(size: VideoSize) {
@@ -396,6 +452,8 @@ fun PlayerScreen(
                             listOf(Color.Black.copy(alpha = 0.75f), Color.Transparent)
                         )
                     )
+                    // 沉浸式横屏时避开挖孔/摄像头区域，返回键不会被挡住
+                    .displayCutoutPadding()
                     .padding(horizontal = 4.dp, vertical = 4.dp)
                     .padding(bottom = 20.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -535,6 +593,51 @@ fun PlayerScreen(
                             "全屏",
                             tint = Color.White
                         )
+                    }
+                }
+            }
+        }
+
+        // 播放失败提示：显示具体原因 + 重试 / 外部播放器 / 返回
+        errorMsg.value?.let { msg ->
+            Box(
+                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.88f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    Modifier.padding(horizontal = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "无法播放", color = Color.White, fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        msg,
+                        color = Color.White.copy(alpha = 0.78f),
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (canRetry) {
+                            Button(
+                                onClick = {
+                                    errorMsg.value = null
+                                    isBuffering.value = true
+                                    player.prepare()
+                                    player.playWhenReady = true
+                                },
+                                shape = RoundedCornerShape(999.dp)
+                            ) { Text("重试") }
+                        }
+                        OutlinedButton(onClick = onOpenExternal, shape = RoundedCornerShape(999.dp)) {
+                            Text("外部播放器", color = Color.White)
+                        }
+                        OutlinedButton(onClick = onBack, shape = RoundedCornerShape(999.dp)) {
+                            Text("返回", color = Color.White)
+                        }
                     }
                 }
             }
@@ -697,3 +800,45 @@ fun SubtitlePickerDialog(
 private fun decodePathForUi(path: String): String = runCatching {
     java.net.URLDecoder.decode(path, "UTF-8")
 }.getOrDefault(path)
+
+// ==================== 播放失败处理 ====================
+
+/** 已知不支持的容器格式提示文案 */
+fun unsupportedMessage(name: String): String {
+    val ext = name.substringAfterLast('.', "").uppercase().ifBlank { "该" }
+    return "内置播放器不支持 $ext 格式（Media3 没有对应的解封装器），无法播放。\n\n" +
+            "可点下方「外部播放器」用手机里已安装的播放器打开（如 VLC / MX Player），" +
+            "或先把视频转码成 MP4 / MKV 再播放。"
+}
+
+/** 用系统里已安装的播放器打开；外部播放器读不到认证头，凭据已拼进地址 */
+fun openWithExternalPlayer(ctx: Context, url: String, title: String): Boolean = runCatching {
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(Uri.parse(url), "video/*")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        putExtra(Intent.EXTRA_TITLE, title)
+    }
+    ctx.startActivity(Intent.createChooser(intent, "用其他播放器打开"))
+    true
+}.getOrDefault(false)
+
+/** 把 PlaybackException 翻译成人能看懂的原因 */
+fun describePlaybackError(e: PlaybackException): String {
+    val detail = (e.cause?.message ?: e.message ?: "").take(240)
+    val head = when (e.errorCode) {
+        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+        PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ->
+            "服务器返回错误：文件不存在或没有访问权限（401 / 403 / 404）。"
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+            "网络连接失败，请检查 WebDAV 地址与当前网络。"
+        PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+        PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ->
+            "视频容器不受支持或文件已损坏。"
+        PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+        PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ->
+            "视频编码不受支持，可在「我的 → 解码方式」切换为软件优先后重试。"
+        else -> "播放失败（${e.errorCodeName}）。"
+    }
+    return if (detail.isBlank()) head else "$head\n\n$detail"
+}

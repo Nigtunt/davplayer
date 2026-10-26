@@ -27,8 +27,32 @@ val VIDEO_EXTS = setOf(
     "webm", "mpg", "mpeg", "rmvb", "rm", "3gp", "m4v", "vob"
 )
 
+/**
+ * Media3/ExoPlayer 内置解封装器不支持的容器格式：
+ * RealMedia（RM/RMVB）与 ASF/WMV 没有对应的 Extractor，只能交给外部播放器。
+ */
+val UNSUPPORTED_EXTS = setOf("rmvb", "rm", "wmv", "asf")
+
 fun isVideoFile(name: String): Boolean =
     name.substringAfterLast('.', "").lowercase() in VIDEO_EXTS
+
+fun isUnsupportedVideo(name: String): Boolean =
+    name.substringAfterLast('.', "").lowercase() in UNSUPPORTED_EXTS
+
+/** 把可能是完整 URL（http://host/dav/x）的 href 归一化成服务器路径（/dav/x） */
+fun davPathOf(href: String): String {
+    val h = href.trim()
+    return if (h.startsWith("http://", true) || h.startsWith("https://", true)) {
+        runCatching { URI(h).rawPath ?: h }.getOrDefault(h)
+    } else h
+}
+
+/** 由 WebDAV 源地址推导服务器根路径（已编码），如 /dav/ */
+fun webDavRootPath(url: String): String {
+    val base = url.trim().trimEnd('/')
+    val raw = runCatching { URI(base).rawPath }.getOrNull() ?: "/"
+    return if (raw.endsWith("/")) raw else "$raw/"
+}
 
 class WebDavClient(baseUrl: String, username: String, password: String) {
 
@@ -39,7 +63,7 @@ class WebDavClient(baseUrl: String, username: String, password: String) {
     private val pass = password
 
     /** 服务器上的 WebDAV 根路径（已编码），如 /dav/ */
-    val rootPath: String = (uri.rawPath ?: "/").let { if (it.endsWith("/")) it else "$it/" }
+    val rootPath: String = webDavRootPath(baseUrl)
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -53,6 +77,20 @@ class WebDavClient(baseUrl: String, username: String, password: String) {
 
     fun fileUrl(href: String): String =
         if (href.startsWith("http")) href else origin + href
+
+    /** 带账号密码的地址：交给外部播放器时无法附加认证头，只能把凭据拼进 URL */
+    fun fileUrlWithCredentials(href: String): String {
+        val full = fileUrl(href)
+        if (user.isBlank()) return full
+        return runCatching {
+            val u = URI(full)
+            val info = "${encodeUserInfo(user)}:${encodeUserInfo(pass)}"
+            URI(u.scheme, info, u.host, u.port, u.path, u.query, u.fragment).toString()
+        }.getOrDefault(full)
+    }
+
+    private fun encodeUserInfo(s: String): String =
+        java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 
     suspend fun list(path: String): List<DavEntry> = withContext(Dispatchers.IO) {
         val xml = """<?xml version="1.0" encoding="utf-8" ?>""" +
@@ -103,7 +141,8 @@ class WebDavClient(baseUrl: String, username: String, password: String) {
                 }
                 XmlPullParser.END_TAG -> {
                     if (parser.name.substringAfter(':') == "response") {
-                        val h = href.toString().trim()
+                        // 有些服务端返回完整 URL，统一成服务器路径，方便与目录栈/路径链比较
+                        val h = davPathOf(href.toString().trim())
                         if (h.isNotEmpty() && !samePath(h, requestedPath)) {
                             val display = name.toString().trim().ifBlank {
                                 runCatching {

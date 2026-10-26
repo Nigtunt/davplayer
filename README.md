@@ -34,6 +34,12 @@
 - **进度条**：点击屏幕呼出底部进度条，拖动只变数字、松手跳转；滑动时显示页码浮层
 - **进度同步**：本地历史 + Komga 云端 read-progress 双向记录
 
+### 🔄 更新与发版
+
+- **应用内更新**：启动时每日检查 GitHub Releases，弹窗展示更新说明、下载进度，一键调起安装
+- **固定签名**：密钥存于 GitHub Secrets（不入库），本地与 CI 同一签名，可直接覆盖升级
+- 发版、签名配置与排查流程详见 [docs/RELEASE.md](docs/RELEASE.md)
+
 ### 🔐 隐私与缓存
 
 - 漫画封面/页图以 **AES-256-GCM 加密**保存到本地（密钥托管于 Android KeyStore）
@@ -65,14 +71,18 @@
 **环境要求**：JDK 17+，Android SDK（platform-34，build-tools 34.0.0）
 
 ```bash
-# 本地构建
+# 本地构建：release 用于发版，debug 仅本地调试
+gradle assembleRelease
 gradle assembleDebug
 
 # 产物
+app/build/outputs/apk/release/app-release.apk
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-**CI**：推送到 `main` 分支后 GitHub Actions 自动构建 debug APK，可在 Actions 运行详情的 Artifacts 中下载。
+**CI**：推送到 `main` 分支后 GitHub Actions 自动构建 **release APK**（非 debuggable），产物在 Artifacts 中，文件名为 `DavPlayer-vX.Y.Z.apk`，可直接上传到 Release。
+
+**发版 / 签名 / 应用内更新**：见 [docs/RELEASE.md](docs/RELEASE.md)（含 GitHub Secrets 配置、版本号规则、常见故障排查）。
 
 **系统要求**：Android 7.0（API 24）及以上。
 
@@ -89,6 +99,7 @@ app/src/main/java/com/davplayer/app/
 ├── SecureImage.kt      # 加密图片缓存 + Coil 集成
 ├── Store.kt            # 配置 / 历史存储
 ├── Theme.kt            # PulseStream 双主题设计令牌
+├── Update.kt           # 应用内检查更新（GitHub Releases + 下载/安装）
 └── Log.kt              # 运行日志（内存环形缓冲 + HTTP 拦截器）
 ```
 

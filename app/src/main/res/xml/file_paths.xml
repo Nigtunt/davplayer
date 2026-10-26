@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 更新包下载目录：getExternalFilesDir(null)/apk -->
+    <external-files-path name="apk_external" path="apk/" />
+    <!-- 无外部存储时的兜底：filesDir/apk -->
+    <files-path name="apk_internal" path="apk/" />
+</paths>

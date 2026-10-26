@@ -20,11 +20,44 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+      # 从 Secrets 还原签名证书（密钥不入库）。
+      # 签名必须与已安装版本一致，应用内更新才能覆盖安装，见 docs/RELEASE.md
+      - name: Restore keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::缺少 secret KEYSTORE_BASE64，请按 docs/RELEASE.md 配置密钥"
+            exit 1
+          fi
+          mkdir -p keystore
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > keystore/davplayer.jks
+          test -s keystore/davplayer.jks
+
+      # 出 release 包（非 debuggable、体积更小），debug 包仅本地调试用
+      - name: Build release APK
+        env:
+          DAV_KEYSTORE_PATH: keystore/davplayer.jks
+          DAV_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          DAV_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          DAV_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      # 签名不对的话在 CI 就失败，避免发出装不上的更新包
+      - name: Verify signature
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk
+
+      # 统一成 DavPlayer-vX.Y.Z.apk，方便直接上传到 Release
+      - name: Rename APK
+        run: |
+          VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
+          cp app/build/outputs/apk/release/app-release.apk "DavPlayer-v${VERSION}.apk"
+          ls -lh "DavPlayer-v${VERSION}.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: DavPlayer-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: DavPlayer-release-apk
+          path: DavPlayer-v*.apk

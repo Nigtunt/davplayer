@@ -11,3 +11,8 @@ local.properties
 app/build/
 ci-apk/
 *.apk
+
+# 签名密钥与密码（只存在于本地 / GitHub Secrets，绝不入库）
+/keystore/*.jks
+/keystore/*.keystore
+/keystore/keystore.properties
