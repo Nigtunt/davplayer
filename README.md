@@ -2,7 +2,7 @@
 
 **WebDAV 视频播放器 + Komga 漫画阅读器**（Android），可配合 OpenList / Alist 等 WebDAV 服务与 [Komga](https://komga.org/) 漫画服务器使用。
 
-最新版本：**v2.1.1** · [下载 APK](https://github.com/Nigtunt/davplayer/releases/latest)
+最新版本：**v2.2.0** · [下载 APK](https://github.com/Nigtunt/davplayer/releases/latest)
 
 ---
 
@@ -42,6 +42,7 @@
 
 ### 🔐 隐私与缓存
 
+- **隐私模式**（默认关闭）：启动显示可正常使用的伪装计算器，输入 `19981212` 按 `=` 才进入应用；整个 App 退到后台会自动重新上锁
 - 漫画封面/页图以 **AES-256-GCM 加密**保存到本地（密钥托管于 Android KeyStore）
 - 列表展示走加密缓存（秒开不闪烁），进入详情后台刷新一次
 - 设置页可查看缓存占用、一键清空、查看最近请求与缓存日志
@@ -84,6 +85,8 @@ app/build/outputs/apk/debug/app-debug.apk
 
 **发版 / 签名 / 应用内更新**：见 [docs/RELEASE.md](docs/RELEASE.md)（含 GitHub Secrets 配置、版本号规则、常见故障排查）。
 
+**项目状态 / 待办 / 换开发环境交接**：见 [docs/STATUS.md](docs/STATUS.md)。
+
 **系统要求**：Android 7.0（API 24）及以上。
 
 ## 目录结构
@@ -100,6 +103,7 @@ app/src/main/java/com/davplayer/app/
 ├── Store.kt            # 配置 / 历史存储
 ├── Theme.kt            # PulseStream 双主题设计令牌
 ├── Update.kt           # 应用内检查更新（GitHub Releases + 下载/安装）
+├── Privacy.kt          # 隐私模式：伪装计算器锁屏（暗码 19981212）
 └── Log.kt              # 运行日志（内存环形缓冲 + HTTP 拦截器）
 ```
 
