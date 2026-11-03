@@ -1,0 +1,38 @@
+# 用 xcodegen 生成 Xcode 工程：cd ios/iosApp && xcodegen generate
+# 好处是 .xcodeproj 不用入库，也不会因为手改工程文件产生冲突
+name: DavPlayerIos
+options:
+  bundleIdPrefix: com.davplayer
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+
+targets:
+  DavPlayerIos:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: iosApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.davplayer.app.ios
+        PRODUCT_NAME: DavPlayer
+        INFOPLIST_FILE: iosApp/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)/Frameworks"
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-framework"
+          - "ComposeApp"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"

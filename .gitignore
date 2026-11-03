@@ -16,3 +16,11 @@ ci-apk/
 /keystore/*.jks
 /keystore/*.keystore
 /keystore/keystore.properties
+
+# iOS（xcodeproj 由 xcodegen 生成，framework 由 Gradle 产出，都不入库）
+/ios/composeApp/build/
+/ios/iosApp/build/
+/ios/iosApp/Frameworks/
+/ios/iosApp/*.xcodeproj/
+/ios/iosApp/DerivedData/
+*.ipa
