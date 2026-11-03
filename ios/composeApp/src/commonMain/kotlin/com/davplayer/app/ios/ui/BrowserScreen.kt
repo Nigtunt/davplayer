@@ -48,7 +48,7 @@ import com.davplayer.app.ios.theme.SurfaceHigh
 private val WideBreakpoint = 840.dp
 
 @Composable
-fun BrowserScreen(client: DavClient, onExit: () -> Unit) {
+fun BrowserScreen(client: DavClient, onExit: () -> Unit, onOpenSettings: () -> Unit) {
     var stack by remember { mutableStateOf(listOf(client.rootPath)) }
     var entries by remember { mutableStateOf<List<DavEntry>?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -100,7 +100,8 @@ fun BrowserScreen(client: DavClient, onExit: () -> Unit) {
                         canGoUp = stack.size > 1,
                         onUp = onUp,
                         onRefresh = onRetry,
-                        onExit = onExit
+                        onExit = onExit,
+                        onOpenSettings = onOpenSettings
                     )
                     HorizontalDivider(color = Hairline, thickness = 1.dp)
                     DirectoryList(
@@ -124,7 +125,8 @@ fun BrowserScreen(client: DavClient, onExit: () -> Unit) {
                     canGoUp = stack.size > 1,
                     onUp = onUp,
                     onRefresh = onRetry,
-                    onExit = onExit
+                    onExit = onExit,
+                    onOpenSettings = onOpenSettings
                 )
                 HorizontalDivider(color = Hairline, thickness = 1.dp)
                 DirectoryList(
@@ -175,7 +177,8 @@ private fun SidebarHeader(
     canGoUp: Boolean,
     onUp: () -> Unit,
     onRefresh: () -> Unit,
-    onExit: () -> Unit
+    onExit: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -187,6 +190,7 @@ private fun SidebarHeader(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
+            TextButton(onClick = onOpenSettings) { Text("设置", fontSize = 12.sp, color = Muted) }
             TextButton(onClick = onExit) { Text("换源", fontSize = 12.sp, color = Muted) }
         }
         Text(
@@ -212,7 +216,8 @@ private fun PhoneTopBar(
     canGoUp: Boolean,
     onUp: () -> Unit,
     onRefresh: () -> Unit,
-    onExit: () -> Unit
+    onExit: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
@@ -230,6 +235,7 @@ private fun PhoneTopBar(
             modifier = Modifier.weight(1f)
         )
         TextButton(onClick = onRefresh) { Text("刷新", fontSize = 12.sp, color = Muted) }
+        TextButton(onClick = onOpenSettings) { Text("⚙", fontSize = 15.sp, color = Muted) }
         TextButton(onClick = onExit) { Text("换源", fontSize = 12.sp, color = Muted) }
     }
 }

@@ -1,5 +1,7 @@
 package com.davplayer.app
 
+import android.app.Activity
+import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
@@ -87,6 +89,46 @@ fun startPlayer(ctx: Context, href: String, title: String, positionMs: Long = 0L
 fun App() {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
+
+    // ---------- 隐私模式：启动先显示计算器，暗码解锁 ----------
+    var locked by remember { mutableStateOf(settings.privacyMode) }
+    PrivacyGate.locked = locked
+
+    // 整个应用退到后台时重新上锁；应用内切换页面（如进播放器）不会触发
+    DisposableEffect(Unit) {
+        val app = ctx.applicationContext as? Application
+        var started = 1
+        val callbacks = object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityStarted(activity: Activity) { started++ }
+            override fun onActivityStopped(activity: Activity) {
+                started--
+                if (started <= 0 && settings.privacyMode) {
+                    locked = true
+                    // 同步给其它 Activity（此时 MainActivity 已停止，等重组会太晚）
+                    PrivacyGate.locked = true
+                }
+            }
+
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+            override fun onActivityResumed(activity: Activity) {}
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        }
+        app?.registerActivityLifecycleCallbacks(callbacks)
+        onDispose { app?.unregisterActivityLifecycleCallbacks(callbacks) }
+    }
+
+    if (locked) {
+        DavThemeProvider(dark = true) {
+            CalculatorScreen(onUnlock = {
+                locked = false
+                PrivacyGate.locked = false
+            })
+        }
+        return
+    }
+
     var tab by remember { mutableStateOf(Tab.Browse) }
     var sourcesVersion by remember { mutableStateOf(0) }
     var themeMode by remember { mutableStateOf(settings.themeMode) }
@@ -1308,6 +1350,36 @@ fun SettingsScreen(
                     listOf("hw" to "硬件优先", "sw" to "软件优先").forEach { (m, label) ->
                         PulseChip(label, decodeMode == m) { decodeMode = m; settings.decodeMode = m }
                     }
+                }
+            }
+        }
+
+        // ---------- 隐私 ----------
+        item { GroupLabel("隐私") }
+        item {
+            var privateMode by remember { mutableStateOf(settings.privacyMode) }
+            SettingsBlock {
+                Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SIcon("🔒")
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("隐私模式", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "启动时显示计算器，输入 19981212 后按 = 进入应用；退到后台会重新上锁",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = privateMode,
+                        onCheckedChange = {
+                            privateMode = it
+                            settings.privacyMode = it
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
                 }
             }
         }

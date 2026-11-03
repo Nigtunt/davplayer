@@ -55,6 +55,14 @@ class ReaderActivity : ComponentActivity() {
         const val EXTRA_PAGE = "page"
     }
 
+    override fun onResume() {
+        super.onResume()
+        // 隐私模式重新上锁后，不允许停留在阅读器
+        if (PrivacyGate.locked) {
+            finish()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val bookId = intent.getStringExtra(EXTRA_BOOK_ID) ?: run { finish(); return }

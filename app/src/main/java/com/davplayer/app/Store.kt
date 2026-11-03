@@ -91,6 +91,11 @@ class Settings(ctx: Context) {
         get() = sp.getString("lastPath", null)
         set(v) = sp.edit().putString("lastPath", v).apply()
 
+    /** 隐私模式：开启后启动显示计算器，输入暗码才进入应用；默认关闭 */
+    var privacyMode: Boolean
+        get() = sp.getBoolean("privacyMode", false)
+        set(v) = sp.edit().putBoolean("privacyMode", v).apply()
+
     // ---------- Komga 服务器 ----------
 
     var komgaUrl: String

@@ -239,6 +239,14 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // 应用从后台回来时若仍处于隐私锁定状态，不允许停留在播放器
+        if (PrivacyGate.locked) {
+            finish()
+        }
+    }
+
     override fun onDestroy() {
         player?.release()
         player = null

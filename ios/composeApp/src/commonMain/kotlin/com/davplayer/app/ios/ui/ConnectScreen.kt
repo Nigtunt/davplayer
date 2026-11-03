@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,7 +33,7 @@ import com.davplayer.app.ios.theme.Muted
 
 /** 连接页：iPad 上居中成一张卡片，不会铺满整个宽屏 */
 @Composable
-fun ConnectScreen(onConnect: (DavClient) -> Unit) {
+fun ConnectScreen(onConnect: (DavClient) -> Unit, onOpenSettings: () -> Unit) {
     var url by remember { mutableStateOf("http://192.168.1.10:5244/dav") }
     var user by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
@@ -41,6 +42,11 @@ fun ConnectScreen(onConnect: (DavClient) -> Unit) {
         Modifier.fillMaxSize().padding(horizontal = 24.dp),
         contentAlignment = Alignment.Center
     ) {
+        TextButton(
+            onClick = onOpenSettings,
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 12.dp)
+        ) { Text("设置", fontSize = 12.sp, color = Muted) }
+
         Column(
             Modifier.widthIn(max = 460.dp).fillMaxWidth(),
             verticalArrangement = Arrangement.Center
