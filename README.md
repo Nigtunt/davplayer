@@ -2,7 +2,7 @@
 
 **WebDAV 视频播放器 + Komga 漫画阅读器**（Android），可配合 OpenList / Alist 等 WebDAV 服务与 [Komga](https://komga.org/) 漫画服务器使用。
 
-最新版本：**v2.0.0** · [下载 APK](https://github.com/Nigtunt/davplayer/releases/latest)
+最新版本：**v2.1.1** · [下载 APK](https://github.com/Nigtunt/davplayer/releases/latest)
 
 ---
 

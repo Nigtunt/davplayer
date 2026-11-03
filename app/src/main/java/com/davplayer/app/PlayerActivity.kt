@@ -19,12 +19,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
@@ -44,15 +47,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.common.text.CueGroup
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -60,6 +68,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
+import androidx.media3.ui.SubtitleView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -269,6 +279,13 @@ fun PlayerScreen(
     val subtitleName = remember { mutableStateOf<String?>(null) }
     val showSubtitlePicker = remember { mutableStateOf(false) }
 
+    // Media3 的 TextRenderer 只负责解析字幕，画面必须由 SubtitleView 渲染（onCues 回调）
+    var subtitleView by remember { mutableStateOf<SubtitleView?>(null) }
+    // 当前媒体里的文本轨（内嵌字幕），供字幕选择器列出
+    var textGroups by remember { mutableStateOf<List<Tracks.Group>>(emptyList()) }
+    var autoSubtitleDone by remember { mutableStateOf(false) }
+    var preferLastTextTrack by remember { mutableStateOf(false) }
+
     var coverTried by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
@@ -304,6 +321,47 @@ fun PlayerScreen(
                         size.width * size.pixelWidthHeightRatio / size.height
                     )
                 }
+            }
+
+            override fun onCues(cueGroup: CueGroup) {
+                subtitleView?.setCues(cueGroup.cues)
+            }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                autoSubtitleDone = false
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                val groups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+                textGroups = groups
+                logTrackInfo(tracks)
+                if (autoSubtitleDone || groups.isEmpty()) return
+                autoSubtitleDone = true
+
+                // 轨道选择器（DefaultTrackSelector）已自动选中就直接用
+                val alreadySelected = groups.firstOrNull { it.isSelected }
+                if (alreadySelected != null) {
+                    subtitleName.value = subtitleLabel(alreadySelected.getTrackFormat(0))
+                    return
+                }
+
+                val supported = groups.filter { it.isSupported }
+                if (supported.isEmpty()) {
+                    // 典型情况：PGS / VobSub 图形字幕，Media3 没有对应渲染器
+                    AppLog.log(
+                        "SUB",
+                        "内嵌字幕 ${groups.size} 条，但都不受支持：" +
+                                groups.joinToString { it.getTrackFormat(0).sampleMimeType ?: "-" }
+                    )
+                    return
+                }
+                val target = if (preferLastTextTrack) supported.last()
+                else supported.firstOrNull {
+                    it.getTrackFormat(0).selectionFlags and C.SELECTION_FLAG_DEFAULT != 0
+                } ?: supported.first()
+                applyTextTrack(player, target)
+                subtitleName.value = subtitleLabel(target.getTrackFormat(0))
+                AppLog.log("SUB", "自动选择内嵌字幕：${subtitleLabel(target.getTrackFormat(0))}")
             }
         }
         player.addListener(listener)
@@ -351,6 +409,32 @@ fun PlayerScreen(
                 }
             },
             modifier = Modifier.align(Alignment.Center).fillMaxSize()
+        )
+
+        // 字幕层：TextRenderer 解析出来的 cue 必须交给 SubtitleView 才会显示（内嵌 / 外挂都走这里）
+        AndroidView(
+            factory = { ctx ->
+                SubtitleView(ctx).apply {
+                    setStyle(
+                        CaptionStyleCompat(
+                            android.graphics.Color.WHITE,
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT,
+                            CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
+                            android.graphics.Color.BLACK,
+                            null
+                        )
+                    )
+                    setApplyEmbeddedStyles(true)     // 保留 ASS/SSA 的基础样式（字号/颜色）
+                    setApplyEmbeddedFontSizes(true)
+                    setFractionalTextSize(0.055f)
+                    setBottomPaddingFraction(0.12f)  // 抬高一点，避免被底部控制栏挡住
+                    isClickable = false
+                    isFocusable = false
+                    subtitleView = this
+                }
+            },
+            modifier = Modifier.fillMaxSize()
         )
 
         // 手势层：点击切换控制栏，长按临时倍速，横向拖动调整进度
@@ -643,12 +727,30 @@ fun PlayerScreen(
             }
         }
 
-        // 字幕选择对话框（默认打开视频所在同级目录）
+        // 字幕选择对话框：内嵌字幕轨 + 外挂字幕文件（默认打开视频所在同级目录）
         if (showSubtitlePicker.value) {
             SubtitlePickerDialog(
                 client = client,
                 startDir = parentDirOf(videoHref),
+                embedded = textGroups,
+                subtitlesEnabled = textGroups.any { it.isSelected },
                 onDismiss = { showSubtitlePicker.value = false },
+                onDisableSubtitles = {
+                    showSubtitlePicker.value = false
+                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        .build()
+                    subtitleName.value = null
+                },
+                onSelectEmbedded = { index ->
+                    val group = textGroups.getOrNull(index)
+                    if (group != null) {
+                        showSubtitlePicker.value = false
+                        applyTextTrack(player, group)
+                        subtitleName.value = subtitleLabel(group.getTrackFormat(0))
+                    }
+                },
                 onPick = { entry ->
                     showSubtitlePicker.value = false
                     subtitleName.value = entry.name
@@ -673,6 +775,9 @@ fun PlayerScreen(
                             .build(),
                         pos
                     )
+                    // 外挂字幕轨会追加在末尾，重选后优先选它
+                    preferLastTextTrack = true
+                    autoSubtitleDone = false
                     player.prepare()
                     player.play()
                 }
@@ -691,7 +796,11 @@ fun parentDirOf(href: String): String {
 fun SubtitlePickerDialog(
     client: WebDavClient,
     startDir: String,
+    embedded: List<Tracks.Group> = emptyList(),
+    subtitlesEnabled: Boolean = false,
     onDismiss: () -> Unit,
+    onDisableSubtitles: () -> Unit = {},
+    onSelectEmbedded: (Int) -> Unit = {},
     onPick: (DavEntry) -> Unit
 ) {
     var dir by remember { mutableStateOf(if (startDir.startsWith(client.rootPath)) startDir else client.rootPath) }
@@ -717,20 +826,52 @@ fun SubtitlePickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Column {
-                Text("选择字幕文件")
+        title = { Text("字幕") },
+        text = {
+            Column(Modifier.fillMaxWidth().height(430.dp)) {
+                // 已有字幕轨（内嵌 + 已加载的外挂）
+                if (embedded.isNotEmpty()) {
+                    Text(
+                        "字幕轨",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    )
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 176.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        SubtitleOptionRow(
+                            title = "关闭字幕",
+                            subtitle = null,
+                            enabled = true,
+                            selected = !subtitlesEnabled,
+                            onClick = onDisableSubtitles
+                        )
+                        embedded.forEachIndexed { index, group ->
+                            val format = group.getTrackFormat(0)
+                            SubtitleOptionRow(
+                                title = subtitleLabel(format),
+                                subtitle = if (group.isSupported) format.sampleMimeType
+                                else "图形字幕（PGS / VobSub），内置播放器无法渲染",
+                                enabled = group.isSupported,
+                                selected = group.isSelected,
+                                onClick = { onSelectEmbedded(index) }
+                            )
+                        }
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                }
+
                 Text(
-                    decodePathForUi(dir),
-                    style = MaterialTheme.typography.bodySmall,
+                    "外挂字幕 · ${decodePathForUi(dir)}",
+                    fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-            }
-        },
-        text = {
-            Column(Modifier.fillMaxWidth().height(380.dp)) {
                 // 上级目录
                 Row(
                     Modifier
@@ -792,9 +933,106 @@ fun SubtitlePickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text("关闭") }
         }
     )
+}
+
+/** 字幕选项行（内嵌字幕 / 关闭字幕） */
+@Composable
+private fun SubtitleOptionRow(
+    title: String,
+    subtitle: String?,
+    enabled: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            if (selected) Icons.Default.Check else Icons.Default.Subtitles,
+            null,
+            tint = when {
+                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                selected -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    subtitle,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/** 字幕轨显示名：语言 / 名称 + 格式 */
+fun subtitleLabel(format: Format): String {
+    val name = format.label?.takeIf { it.isNotBlank() } ?: format.language ?: "未标注语言"
+    return "$name · ${subtitleKind(format.sampleMimeType)}"
+}
+
+fun subtitleKind(mime: String?): String = when {
+    mime == null -> "未知格式"
+    mime.contains("ssa", true) -> "ASS/SSA"
+    mime.contains("subrip", true) -> "SRT"
+    mime.contains("vtt", true) -> "WebVTT"
+    mime.contains("ttml", true) -> "TTML"
+    mime.contains("pgs", true) -> "PGS 图形"
+    mime.contains("vobsub", true) -> "VobSub 图形"
+    mime.contains("cea", true) -> "CEA-608"
+    else -> mime.substringAfterLast('/').uppercase()
+}
+
+/** 选中某条文本轨（字幕） */
+fun applyTextTrack(player: Player, group: Tracks.Group) {
+    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+        .addOverride(TrackSelectionOverride(group.mediaTrackGroup, 0))
+        .build()
+}
+
+/** 把当前媒体的轨道信息写进日志，方便排查「字幕/音轨没加载」 */
+fun logTrackInfo(tracks: Tracks) {
+    if (tracks.groups.isEmpty()) return
+    val sb = StringBuilder()
+    tracks.groups.forEach { group ->
+        val type = when (group.type) {
+            C.TRACK_TYPE_VIDEO -> "V"
+            C.TRACK_TYPE_AUDIO -> "A"
+            C.TRACK_TYPE_TEXT -> "S"
+            else -> "?"
+        }
+        for (i in 0 until group.length) {
+            val f = group.getTrackFormat(i)
+            if (sb.isNotEmpty()) sb.append("  ")
+            sb.append(
+                "[$type ${f.sampleMimeType ?: "-"} ${f.language ?: "-"} " +
+                        "sup=${group.isTrackSupported(i)} sel=${group.isTrackSelected(i)}]"
+            )
+        }
+    }
+    AppLog.log("TRACK", sb.toString())
 }
 
 private fun decodePathForUi(path: String): String = runCatching {
