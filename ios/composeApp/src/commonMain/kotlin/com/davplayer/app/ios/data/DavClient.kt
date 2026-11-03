@@ -44,6 +44,13 @@ class DavClient(baseUrl: String, private val user: String, private val pass: Str
     private val authHeader: String? =
         if (user.isBlank()) null else "Basic " + base64("$user:$pass")
 
+    /**
+     * 播放器需要独立的认证信息：VLCKit 通过 media option 传 Basic 认证，
+     * 不能把密码拼进 URL（会出现在日志里，且转义容易出错）。
+     */
+    val authUser: String get() = user
+    val authPass: String get() = pass
+
     fun url(path: String): String =
         if (path.startsWith("http", true)) path else origin + path
 

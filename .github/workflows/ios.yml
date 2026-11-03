@@ -1,7 +1,8 @@
 name: ios-ipa
 
 # iOS 技术验证包：只编译「未签名 ipa」，签名与安装交给 Windows 上的
-# AltStore / Sideloadly（免费 Apple ID，7 天续签）或 TrollStore（永久，限系统版本）
+# AltStore / Sideloadly（免费 Apple ID，7 天续签）
+# 目标机 iPadOS 17.7.11 > 16.6.1，TrollStore 不可用
 on:
   workflow_dispatch:
   push:
@@ -40,10 +41,16 @@ jobs:
       - name: Generate Xcode project
         run: cd ios/iosApp && xcodegen generate
 
+      # 播放内核 MobileVLCKit 走 CocoaPods；先有 .xcodeproj 才能 pod install
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios/iosApp
+          pod install --repo-update
+
       - name: Build app (unsigned)
         run: |
           cd ios/iosApp
-          xcodebuild -project DavPlayerIos.xcodeproj \
+          xcodebuild -workspace DavPlayerIos.xcworkspace \
             -scheme DavPlayerIos \
             -configuration Release \
             -destination 'generic/platform=iOS' \

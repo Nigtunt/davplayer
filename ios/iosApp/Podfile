@@ -1,0 +1,13 @@
+# iOS 播放内核：MobileVLCKit（VLCKit 3.x 稳定版，4.0 仍是 alpha）
+# 3.7.5 提供 MobileVLCKit.xcframework，支持 arm64 真机与模拟器
+platform :ios, '15.0'
+
+project 'DavPlayerIos.xcodeproj'
+
+target 'DavPlayerIos' do
+  pod 'MobileVLCKit', '3.7.5'
+end
+
+# 说明：
+# - 不启用 use_frameworks!，MobileVLCKit 本身是 vendored dynamic framework
+# - xcodegen 生成 .xcodeproj 后执行 pod install，构建时用 .xcworkspace

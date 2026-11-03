@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import com.davplayer.app.ios.data.DavClient
 import com.davplayer.app.ios.data.DavEntry
 import com.davplayer.app.ios.data.isVideoFile
+import com.davplayer.app.ios.player.PlayerBridge
 import com.davplayer.app.ios.theme.Bg
 import com.davplayer.app.ios.theme.Brand
 import com.davplayer.app.ios.theme.Hairline
@@ -86,6 +87,15 @@ fun BrowserScreen(client: DavClient, onExit: () -> Unit, onOpenSettings: () -> U
         }
     }
     val onRetry: () -> Unit = { reloadTick++ }
+    val onPlay: (DavEntry) -> Unit = { entry ->
+        // 交给 Swift + MobileVLCKit 播放，Kotlin 只负责传地址与认证信息
+        PlayerBridge.present(
+            url = client.url(entry.href),
+            title = entry.name,
+            user = client.authUser,
+            pass = client.authPass
+        )
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
         val wide = maxWidth >= WideBreakpoint
@@ -115,7 +125,11 @@ fun BrowserScreen(client: DavClient, onExit: () -> Unit, onOpenSettings: () -> U
                     )
                 }
                 Box(Modifier.width(1.dp).fillMaxHeight().background(Hairline))
-                DetailPane(entry = selected, modifier = Modifier.weight(1f))
+                DetailPane(
+                    entry = selected,
+                    onPlay = { selected?.let(onPlay) },
+                    modifier = Modifier.weight(1f)
+                )
             }
         } else {
             // 手机 / 窄窗口：单列
@@ -138,7 +152,7 @@ fun BrowserScreen(client: DavClient, onExit: () -> Unit, onOpenSettings: () -> U
                     onOpen = onOpen,
                     modifier = Modifier.weight(1f)
                 )
-                selected?.let { BottomHint(it) }
+                selected?.let { BottomHint(it, onPlay = { onPlay(it) }) }
             }
         }
     }
@@ -240,9 +254,9 @@ private fun PhoneTopBar(
     }
 }
 
-/** iPad 右侧详情区（播放器接入后这里换成真正的播放控件） */
+/** iPad 右侧详情区 */
 @Composable
-private fun DetailPane(entry: DavEntry?, modifier: Modifier = Modifier) {
+private fun DetailPane(entry: DavEntry?, onPlay: () -> Unit, modifier: Modifier = Modifier) {
     Column(
         modifier.fillMaxHeight().padding(32.dp),
         verticalArrangement = Arrangement.Center,
@@ -279,22 +293,30 @@ private fun DetailPane(entry: DavEntry?, modifier: Modifier = Modifier) {
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(26.dp))
-            Button(onClick = {}, enabled = false, shape = RoundedCornerShape(999.dp)) {
-                Text("播放（VLCKit 接入中）")
+            Button(onClick = onPlay, shape = RoundedCornerShape(999.dp)) {
+                Text("播放")
             }
         }
     }
 }
 
 @Composable
-private fun BottomHint(entry: DavEntry) {
+private fun BottomHint(entry: DavEntry, onPlay: () -> Unit) {
     HorizontalDivider(color = Hairline, thickness = 1.dp)
-    Text(
-        "已选中：${entry.name}（播放器下一步接入 VLCKit）",
-        fontSize = 11.sp,
-        color = Muted,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
-    )
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            entry.name,
+            fontSize = 12.sp,
+            color = Muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        TextButton(onClick = onPlay) {
+            Text("播放", fontSize = 13.sp, color = Brand)
+        }
+    }
 }

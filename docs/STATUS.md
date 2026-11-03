@@ -9,7 +9,7 @@
 | 端 | 状态 | 产物 |
 |---|---|---|
 | **Android** | 已发布 v2.2.0，功能完整 | GitHub Release 里的 `DavPlayer-v2.2.0.apk`（13.58 MB，release 签名，非 debuggable） |
-| **iOS** | 技术验证骨架（浏览 + 隐私模式），未发布 | CI 产出未签名 `DavPlayer-unsigned.ipa`（9.03 MB，需自签安装） |
+| **iOS** | VLCKit 播放器已接入（浏览 + 播放 + 隐私模式），待真机验证，未发布 | CI 产出未签名 `DavPlayer-unsigned.ipa`（含 VLCKit 后约 60–80 MB，需自签安装） |
 
 构建全部走 GitHub Actions：
 - `.github/workflows/build.yml` → Android release APK（推 main 自动触发）
@@ -34,6 +34,18 @@
 | 11 | iOS CMP 骨架 + iPad 双栏 | `ios/**`、`ios/TODO.md` |
 | 12 | **隐私模式**（伪装计算器，暗码 19981212） | `Privacy.kt`、`MainActivity.kt`、`ios/.../CalculatorScreen.kt` |
 
+### 2.1 本轮 iOS 播放器接入（未发版）
+
+| # | 改动 | 关键文件 |
+|---|---|---|
+| 1 | 接入 **MobileVLCKit 3.7.5**（CocoaPods，xcframework） | `ios/iosApp/Podfile`、`.github/workflows/ios.yml` |
+| 2 | Kotlin→Swift 播放桥（不做 cinterop，Kotlin 只传 URL/账号） | `ios/composeApp/.../player/PlayerBridge.kt` |
+| 3 | 全屏播放页：播放/暂停、拖动、倍速、内嵌字幕、缓冲/错误处理 | `ios/iosApp/iosApp/Player/*.swift` |
+| 4 | 浏览页播放入口（iPad 详情区 / 窄屏底部按钮），Basic 认证走 media option | `BrowserScreen.kt`、`VLCPlayerController.swift` |
+| 5 | 退后台同时退出播放器，避免盖住隐私锁 | `iOSApp.swift` |
+
+> 目标机已确认 **iPad 2019 / iPadOS 17.7.11**：不支持 TrollStore，只能 AltStore/Sideloadly + 免费 Apple ID（7 天续签）。
+
 ---
 
 ## 3. 隐私模式说明（v2.2.0 新增）
@@ -57,10 +69,12 @@
 
 ### iOS（详见 `ios/TODO.md`）
 
-- [ ] **接入 VLCKit**（最高优先级，决定 iOS 版是否成立；能补上 RMVB / PGS 字幕）
-- [ ] 播放历史与续播、字幕面板、Komga 与漫画阅读器
+- [x] 接入 MobileVLCKit 3.7.5 + 全屏播放器
+- [ ] **iPad 真机验证**（MKV / RMVB / PGS 字幕 / 1080p 流畅度）——最高优先级
+- [ ] 外挂字幕（下载后 addPlaybackSlave）、播放历史与续播
+- [ ] Komga 与漫画阅读器
 - [ ] App 图标（`Assets.xcassets`，目前是白图标）
-- [ ] 安装验证：iPad 版本确认后选 TrollStore（≤16.6.1）或 AltStore（17/18）
+- [x] 安装方式确认：iPadOS **17.7.11**，TrollStore 不可用 → AltStore/Sideloadly（7 天）
 - [ ] 把 `ios/.../data/DavClient.kt` 与 Android 的 `Dav.kt` 合并成 `shared/` 模块
 
 ---

@@ -24,3 +24,8 @@ ci-apk/
 /ios/iosApp/*.xcodeproj/
 /ios/iosApp/DerivedData/
 *.ipa
+
+# iOS 依赖（CocoaPods 生成，CI 每次重新安装）
+/ios/iosApp/Pods/
+/ios/iosApp/Podfile.lock
+/ios/iosApp/*.xcworkspace/
