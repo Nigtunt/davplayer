@@ -416,7 +416,7 @@ private fun ComicHistoryRow(item: ComicProgress, client: KomgaClient?, onClick: 
                 )
             } else {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("📖", fontSize = 20.sp)
+                    Text("漫画", fontSize = 11.sp, color = Muted)
                 }
             }
         }

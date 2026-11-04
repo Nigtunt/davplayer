@@ -210,7 +210,7 @@ private fun KomgaTopBar(
 private fun KomgaUnconfigured(onOpenSettings: () -> Unit) {
     Box(Modifier.fillMaxSize().background(Bg), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("📚", fontSize = 38.sp)
+            Text("Komga", fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(10.dp))
             Text("还没有配置 Komga 服务器", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
@@ -750,7 +750,7 @@ private fun BookRow(
         }
         TextButton(onClick = onAdd) { Text("＋", fontSize = 16.sp, color = Muted) }
         if (book.readCompleted) {
-            Text("✓", fontSize = 16.sp, color = Brand)
+            Text("已完成", fontSize = 10.sp, color = Brand)
         }
     }
 }

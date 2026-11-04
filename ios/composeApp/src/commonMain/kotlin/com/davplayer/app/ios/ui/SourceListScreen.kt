@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -69,6 +70,7 @@ fun SourceListScreen(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
+                .imePadding()
                 .padding(horizontal = 24.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -275,7 +277,7 @@ private fun HistoryThumb(item: PlayProgress) {
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Text("🎬", fontSize = 22.sp)
+                Text("视频", fontSize = 11.sp, color = Color.White.copy(alpha = 0.65f))
             }
         }
 

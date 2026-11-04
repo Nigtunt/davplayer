@@ -31,7 +31,8 @@ import com.davplayer.app.ios.theme.SurfaceHigh
 private val imageCache = LinkedHashMap<String, ImageBitmap>()
 
 private fun cachePut(url: String, bitmap: ImageBitmap) {
-    if (imageCache.size >= 120) {
+    // iPad 2019 内存紧张；Skia 的图片内存对 iOS 不可见，压低缓存上限
+    if (imageCache.size >= 40) {
         imageCache.keys.firstOrNull()?.let { imageCache.remove(it) }
     }
     imageCache[url] = bitmap
@@ -40,7 +41,8 @@ private fun cachePut(url: String, bitmap: ImageBitmap) {
 object KomgaImages {
     private val http = HttpClient { expectSuccess = false }
 
-    suspend fun load(url: String, auth: String): ImageBitmap? = withContext(Dispatchers.Default) {
+    // 固定在主线程解码：Skia 在 iPad 上并发 decode 会产生堆损坏（见 2026-11-04 crash log）
+    suspend fun load(url: String, auth: String): ImageBitmap? = withContext(Dispatchers.Main) {
         runCatching {
             val response = http.get(url) {
                 header(HttpHeaders.Authorization, auth)

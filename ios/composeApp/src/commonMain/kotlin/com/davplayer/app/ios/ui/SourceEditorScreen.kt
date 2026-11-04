@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,7 +50,10 @@ fun SourceEditorScreen(
     var user by remember(existing?.id) { mutableStateOf(existing?.user.orEmpty()) }
     var pass by remember(existing?.id) { mutableStateOf(existing?.pass.orEmpty()) }
 
-    Box(Modifier.fillMaxSize().padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
+    Box(
+        Modifier.fillMaxSize().padding(horizontal = 24.dp).imePadding(),
+        contentAlignment = Alignment.Center
+    ) {
         Column(
             Modifier.widthIn(max = 480.dp).fillMaxWidth(),
             verticalArrangement = Arrangement.Center

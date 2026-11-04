@@ -119,14 +119,6 @@ fun BrowserScreen(
         }
     }
 
-    val onOpen: (DavEntry) -> Unit = { entry ->
-        if (entry.isDir) {
-            stack = stack + (if (entry.href.endsWith("/")) entry.href else entry.href + "/")
-            selected = null
-        } else {
-            selected = entry
-        }
-    }
     val onUp: () -> Unit = {
         if (stack.size > 1) {
             stack = stack.dropLast(1)
@@ -139,6 +131,7 @@ fun BrowserScreen(
         val wide = maxWidth >= WideBreakpoint
 
         val startPlay: (DavEntry) -> Unit = { entry ->
+            AppLog.info("UI", "点击视频：${entry.name}")
             val saved = SourceStore.progressFor(source.id, entry.href)
             val startMs = saved?.positionMs ?: 0L
             // 保留上一次的进度和封面，播放器随后会持续回写
@@ -167,6 +160,17 @@ fun BrowserScreen(
             }
         }
 
+        // 目录点击：文件夹进入；视频直接播放（和 Android 行为一致）
+        val openEntry: (DavEntry) -> Unit = { entry ->
+            if (entry.isDir) {
+                stack = stack + (if (entry.href.endsWith("/")) entry.href else entry.href + "/")
+                selected = null
+            } else {
+                selected = entry
+                startPlay(entry)
+            }
+        }
+
         if (wide) {
             // iPad / 横屏：左侧目录树固定 380，右侧详情/播放区
             Row(Modifier.fillMaxSize()) {
@@ -189,7 +193,7 @@ fun BrowserScreen(
                         error = error,
                         selectedHref = selected?.href,
                         onRetry = onRetry,
-                        onOpen = onOpen,
+                        onOpen = openEntry,
                         state = listState,
                         modifier = Modifier.weight(1f)
                     )
@@ -236,7 +240,7 @@ fun BrowserScreen(
                     error = error,
                     selectedHref = selected?.href,
                     onRetry = onRetry,
-                    onOpen = onOpen,
+                    onOpen = openEntry,
                     state = listState,
                     modifier = Modifier.weight(1f)
                 )
@@ -373,7 +377,7 @@ private fun DetailPane(entry: DavEntry?, onPlay: () -> Unit, modifier: Modifier 
             Box(
                 Modifier.size(120.dp).background(SurfaceHigh, RoundedCornerShape(18.dp)),
                 contentAlignment = Alignment.Center
-            ) { Text("🎬", fontSize = 44.sp) }
+            ) { Text("视频", fontSize = 16.sp, color = Muted) }
 
             Spacer(Modifier.height(22.dp))
             Text(
