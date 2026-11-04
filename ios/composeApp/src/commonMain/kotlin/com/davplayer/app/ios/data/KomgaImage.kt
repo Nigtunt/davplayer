@@ -59,45 +59,10 @@ object KomgaImages {
                 AppLog.warn("Komga", "图片 HTTP ${response.status.value}：$url")
                 return@runCatching null
             }
-            decodeScaled(response.bodyAsBytes(), maxWidth)
+            decodeImageBitmap(response.bodyAsBytes(), maxWidth)
         }.onFailure {
             AppLog.warn("Komga", "图片加载失败：$url")
         }.getOrNull()
-    }
-
-    /**
-     * Komga 缩略图有时是原始大图，直接解码会让 iPad 2019 瞬间占用几百 MB。
-     * 解码后按目标宽度缩放，再把缩放结果复制进 Compose ImageBitmap。
-     */
-    private fun decodeScaled(bytes: ByteArray, maxWidth: Int): ImageBitmap? {
-        val source = org.jetbrains.skia.Image.makeFromEncoded(bytes)
-        return try {
-            if (source.width <= maxWidth) {
-                source.toComposeImageBitmap()
-            } else {
-                val ratio = maxWidth.toFloat() / source.width
-                val targetHeight = (source.height * ratio).toInt().coerceAtLeast(1)
-                val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(maxWidth, targetHeight)
-                try {
-                    surface.canvas.drawImageRect(
-                        source,
-                        org.jetbrains.skia.Rect.makeWH(
-                            source.width.toFloat(),
-                            source.height.toFloat()
-                        ),
-                        org.jetbrains.skia.Rect.makeWH(
-                            maxWidth.toFloat(),
-                            targetHeight.toFloat()
-                        )
-                    )
-                    surface.makeImageSnapshot().toComposeImageBitmap()
-                } finally {
-                    surface.close()
-                }
-            }
-        } finally {
-            source.close()
-        }
     }
 }
 

@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -90,7 +91,15 @@ fun BrowserScreen(
     var playing by remember { mutableStateOf<DavEntry?>(null) }
     var showSubtitlePicker by remember { mutableStateOf(false) }
     var playError by remember { mutableStateOf<String?>(null) }
+    var playPending by remember { mutableStateOf(false) }
     var reloadTick by remember { mutableStateOf(0) }
+
+    LaunchedEffect(playPending) {
+        if (playPending) {
+            kotlinx.coroutines.delay(2400)
+            playPending = false
+        }
+    }
 
     val path = stack.last()
     val listState = remember(path) { LazyListState(scrollPositions[path] ?: 0) }
@@ -146,6 +155,7 @@ fun BrowserScreen(
                 playError = "全屏播放器未注册（Swift 侧未初始化）"
                 return@play
             }
+            playPending = true
             val saved = SourceStore.progressFor(source.id, entry.href)
             val startMs = saved?.positionMs ?: 0L
             // 保留上一次的进度和封面，播放器随后会持续回写
@@ -259,6 +269,19 @@ fun BrowserScreen(
                     modifier = Modifier.weight(1f)
                 )
                 selected?.let { BottomHint(it, onPlay = { startPlay(it) }) }
+            }
+        }
+    }
+
+    if (playPending) {
+        Box(
+            Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(color = Brand)
+                Spacer(Modifier.height(10.dp))
+                Text("正在打开播放器…", color = Color.White, fontSize = 13.sp)
             }
         }
     }
