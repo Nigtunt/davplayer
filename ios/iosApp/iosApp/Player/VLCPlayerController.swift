@@ -22,10 +22,17 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
     @Published private(set) var subtitleIndexes: [Int32] = []
     @Published private(set) var currentSubtitleIndex: Int32 = -1
 
+    /// 进度回调：position / duration（秒）/ 本地封面路径
+    var onProgress: ((Double, Double, String?) -> Void)?
+
     private var mediaURL: URL?
     private var httpUser = ""
     private var httpPass = ""
     private var desiredRate: Float = 1
+    private var pendingSeekMs: Int64 = 0
+    private var coverPath: String?
+    private var coverAttempted = false
+    private var lastReportAt: TimeInterval = 0
 
     override init() {
         super.init()
@@ -37,10 +44,14 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
 
     // MARK: - 生命周期
 
-    func start(url: URL, user: String, pass: String) {
+    func start(url: URL, user: String, pass: String, startMs: Int64 = 0) {
         mediaURL = url
         httpUser = user
         httpPass = pass
+        pendingSeekMs = startMs
+        coverPath = nil
+        coverAttempted = false
+        lastReportAt = 0
         activateAudioSession()
         playCurrent()
     }
@@ -50,6 +61,8 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
     }
 
     func stop() {
+        // 退出前再报一次最终进度
+        onProgress?(currentTime, duration, coverPath)
         player.stop()
         player.drawable = nil
         UIApplication.shared.isIdleTimerDisabled = false
@@ -114,6 +127,12 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
         player.play()
     }
 
+    /// 外挂字幕（WebDAV 上的 srt/ass/ssa/vtt）
+    func loadSubtitle(_ url: String) {
+        guard let parsed = URL(string: url) else { return }
+        player.addPlaybackSlave(parsed, type: .subtitle, enforce: true)
+    }
+
     private func activateAudioSession() {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .moviePlayback, options: [])
@@ -140,6 +159,11 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
             if desiredRate != 1 {
                 player.rate = desiredRate
             }
+            if pendingSeekMs > 0 {
+                let target = Double(pendingSeekMs) / 1000.0
+                pendingSeekMs = 0
+                player.time = VLCTime(int: Int32(target * 1000))
+            }
         case .paused:
             isBuffering = false
             isPlaying = false
@@ -162,6 +186,34 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
         currentTime = max(0, Double(player.time.intValue) / 1000)
         if let length = player.media?.length.intValue, length > 0 {
             duration = Double(length) / 1000
+        }
+
+        let now = Date().timeIntervalSince1970
+        if player.isPlaying && now - lastReportAt >= 5 {
+            lastReportAt = now
+            onProgress?(currentTime, duration, coverPath)
+        }
+
+        if !coverAttempted && player.isPlaying && currentTime >= 2.5 {
+            coverAttempted = true
+            generateCover()
+        }
+    }
+
+    private func generateCover() {
+        guard let mediaURL else { return }
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("covers", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let name = String(abs(mediaURL.absoluteString.hashValue))
+        let path = dir.appendingPathComponent("\(name).jpg").path
+        if !FileManager.default.fileExists(atPath: path) {
+            player.saveVideoSnapshot(at: path, withWidth: 320, andHeight: 180)
+        }
+        if FileManager.default.fileExists(atPath: path) {
+            coverPath = path
+            onProgress?(currentTime, duration, coverPath)
         }
     }
 

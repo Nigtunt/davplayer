@@ -13,10 +13,17 @@ import com.davplayer.app.ios.player.PlayerPresenter
  */
 fun main() = application {
     PlayerBridge.presenter = object : PlayerPresenter {
-        override fun present(url: String, title: String, user: String, pass: String) {
-            println("[desktop] play: $title")
+        override fun present(
+            url: String,
+            title: String,
+            user: String,
+            pass: String,
+            startMs: Long,
+            sourceId: String,
+            path: String
+        ) {
+            println("[desktop] play: $title @ ${startMs / 1000}s")
             println("[desktop] url : $url")
-            println("[desktop] user: ${user.ifBlank { "<anonymous>" }}")
         }
 
         override fun dismiss() {

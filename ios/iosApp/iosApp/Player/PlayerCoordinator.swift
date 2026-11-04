@@ -9,6 +9,7 @@ struct PlayRequest: Identifiable {
     let title: String
     let user: String
     let pass: String
+    let startMs: Int64
 }
 
 /// 播放器呈现协调器（SwiftUI fullScreenCover 绑定这个对象）
@@ -35,10 +36,24 @@ final class PlayerCoordinator: ObservableObject {
 
 /// 实现 Kotlin 的 PlayerPresenter：Kotlin 只传地址和认证信息，播放交给 VLCKit
 final class SwiftPlayerPresenter: NSObject, PlayerPresenter {
-    func present(url: String, title: String, user: String, pass: String) {
+    func present(
+        url: String,
+        title: String,
+        user: String,
+        pass: String,
+        startMs: Int64,
+        sourceId: String,
+        path: String
+    ) {
         guard let parsed = URL(string: url) else { return }
         PlayerCoordinator.shared.present(
-            PlayRequest(url: parsed, title: title, user: user, pass: pass)
+            PlayRequest(
+                url: parsed,
+                title: title,
+                user: user,
+                pass: pass,
+                startMs: startMs
+            )
         )
     }
 

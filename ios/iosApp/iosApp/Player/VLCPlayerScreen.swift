@@ -13,6 +13,8 @@ struct VLCPlayerScreen: View {
     @State private var isScrubbing = false
     @State private var scrubTime: Double = 0
     @State private var hideWorkItem: DispatchWorkItem?
+    @State private var longPressActive = false
+    @State private var longPressBaseRate: Double = 1
 
     private let rates: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0]
 
@@ -35,6 +37,27 @@ struct VLCPlayerScreen: View {
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture { toggleControls() }
+                .onLongPressGesture(
+                    minimumDuration: 0.5,
+                    maximumDistance: 20,
+                    pressing: { pressing in
+                        if pressing && !longPressActive {
+                            longPressActive = true
+                            longPressBaseRate = controller.rate
+                            controller.setRate(2.0)
+                        } else if !pressing && longPressActive {
+                            longPressActive = false
+                            controller.setRate(longPressBaseRate)
+                        }
+                    },
+                    perform: {}
+                )
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 20).onEnded { value in
+                        let delta = Double(value.translation.width / 300.0) * 120.0
+                        controller.seek(to: controller.currentTime + delta)
+                    }
+                )
 
             if showControls {
                 controlsOverlay
@@ -51,7 +74,20 @@ struct VLCPlayerScreen: View {
         .background(Color.black)
         .interactiveDismissDisabled(true)
         .onAppear {
-            controller.start(url: request.url, user: request.user, pass: request.pass)
+            controller.onProgress = { position, duration, cover in
+                PlayerBridge.shared.reportProgress(
+                    url: request.url.absoluteString,
+                    positionMs: Int64(position * 1000),
+                    durationMs: Int64(duration * 1000),
+                    coverPath: cover
+                )
+            }
+            controller.start(
+                url: request.url,
+                user: request.user,
+                pass: request.pass,
+                startMs: request.startMs
+            )
             scheduleHide()
         }
         .onDisappear {

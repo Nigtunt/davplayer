@@ -1,5 +1,8 @@
 package com.davplayer.app.ios.player
 
+import com.davplayer.app.ios.data.AppLog
+import com.davplayer.app.ios.data.SourceStore
+
 /**
  * 播放器桥。
  *
@@ -9,19 +12,101 @@ package com.davplayer.app.ios.player
  * Swift 在 App 启动时把实现注册进来：`PlayerBridge.shared.presenter = SwiftPlayerPresenter()`。
  */
 interface PlayerPresenter {
-    fun present(url: String, title: String, user: String, pass: String)
+    fun present(
+        url: String,
+        title: String,
+        user: String,
+        pass: String,
+        startMs: Long,
+        sourceId: String,
+        path: String
+    )
+
     fun dismiss()
 }
 
+/** 窗口坐标（point），由 Compose 的 boundsInWindow 换算后传给 Swift */
+data class PlayerFrame(
+    val x: Double,
+    val y: Double,
+    val width: Double,
+    val height: Double
+)
+
+/**
+ * 内嵌播放器：Swift 在 key window 上叠加一个与 Compose 占位区域同尺寸的播放器视图。
+ * 全屏由 Swift 自己扩展同一实例，Kotlin 只负责位置和生命周期。
+ */
+interface InlinePresenter {
+    fun show(
+        url: String,
+        title: String,
+        user: String,
+        pass: String,
+        startMs: Long,
+        sourceId: String,
+        path: String,
+        frame: PlayerFrame
+    )
+
+    fun updateFrame(frame: PlayerFrame)
+    fun hide()
+    fun setSubtitle(url: String)
+}
+
 object PlayerBridge {
+    private data class Session(val sourceId: String, val path: String, val title: String)
+
+    private val sessions = mutableMapOf<String, Session>()
+
     /** 未注册（例如预览环境）时静默忽略 */
     var presenter: PlayerPresenter? = null
+    var inlinePresenter: InlinePresenter? = null
 
-    fun present(url: String, title: String, user: String, pass: String) {
-        presenter?.present(url, title, user, pass)
+    fun registerSession(url: String, sourceId: String, path: String, title: String) {
+        if (sourceId.isNotBlank() && path.isNotBlank()) {
+            sessions[url] = Session(sourceId, path, title)
+        }
+    }
+
+    /** Swift 每 5 秒、停止时回调；封面由 VLC 截图后传本地路径 */
+    fun reportProgress(url: String, positionMs: Long, durationMs: Long, coverPath: String?) {
+        val session = sessions[url] ?: return
+        SourceStore.record(
+            sourceId = session.sourceId,
+            path = session.path,
+            name = session.title,
+            positionMs = positionMs,
+            durationMs = durationMs,
+            coverPath = coverPath
+        )
+    }
+
+    fun present(
+        url: String,
+        title: String,
+        user: String,
+        pass: String,
+        startMs: Long,
+        sourceId: String,
+        path: String
+    ) {
+        registerSession(url, sourceId, path, title)
+        AppLog.info("Player", "全屏播放：$title @ ${startMs / 1000}s")
+        presenter?.present(url, title, user, pass, startMs, sourceId, path)
     }
 
     fun dismiss() {
         presenter?.dismiss()
+    }
+
+    fun hideInline() {
+        AppLog.info("Player", "关闭内嵌播放")
+        inlinePresenter?.hide()
+    }
+
+    fun setSubtitle(url: String) {
+        AppLog.info("Player", "加载外挂字幕")
+        inlinePresenter?.setSubtitle(url)
     }
 }

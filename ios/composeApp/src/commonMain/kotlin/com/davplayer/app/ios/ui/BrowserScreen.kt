@@ -1,6 +1,7 @@
 package com.davplayer.app.ios.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -11,19 +12,27 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -32,14 +41,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.davplayer.app.ios.data.AppLog
 import com.davplayer.app.ios.data.DavClient
 import com.davplayer.app.ios.data.DavEntry
+import com.davplayer.app.ios.data.DavSource
+import com.davplayer.app.ios.data.SourceStore
 import com.davplayer.app.ios.data.isVideoFile
 import com.davplayer.app.ios.player.PlayerBridge
 import com.davplayer.app.ios.theme.Bg
 import com.davplayer.app.ios.theme.Brand
+import com.davplayer.app.ios.theme.Danger
 import com.davplayer.app.ios.theme.Hairline
 import com.davplayer.app.ios.theme.Muted
 import com.davplayer.app.ios.theme.SurfaceBg
@@ -48,16 +62,41 @@ import com.davplayer.app.ios.theme.SurfaceHigh
 /** 宽度达到这个值就切成 iPad 双栏 */
 private val WideBreakpoint = 840.dp
 
+private val SubtitleExts = setOf("srt", "ass", "ssa", "vtt")
+
 @Composable
-fun BrowserScreen(client: DavClient, onExit: () -> Unit, onOpenSettings: () -> Unit) {
-    var stack by remember { mutableStateOf(listOf(client.rootPath)) }
+fun BrowserScreen(
+    source: DavSource,
+    initialPath: String? = null,
+    highlightHref: String? = null,
+    onSwitchSource: (DavSource) -> Unit,
+    onExit: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    val client = remember(source) { DavClient(source.url, source.user, source.pass) }
+    var stack by remember(source) {
+        val restored = initialPath
+            ?: SourceStore.lastPath(source.id)?.takeIf { it.startsWith(client.rootPath) }
+            ?: client.rootPath
+        mutableStateOf(listOf(restored))
+    }
+    val scrollPositions = remember(source.id) { mutableMapOf<String, Int>() }
     var entries by remember { mutableStateOf<List<DavEntry>?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf<DavEntry?>(null) }
+    var playing by remember { mutableStateOf<DavEntry?>(null) }
+    var showSubtitlePicker by remember { mutableStateOf(false) }
     var reloadTick by remember { mutableStateOf(0) }
 
     val path = stack.last()
+    val listState = remember(path) { LazyListState(scrollPositions[path] ?: 0) }
+
+    LaunchedEffect(path) { SourceStore.setLastPath(source.id, path) }
+
+    DisposableEffect(path) {
+        onDispose { scrollPositions[path] = listState.firstVisibleItemIndex }
+    }
 
     LaunchedEffect(path, reloadTick) {
         loading = true
@@ -67,9 +106,17 @@ fun BrowserScreen(client: DavClient, onExit: () -> Unit, onOpenSettings: () -> U
             entries = client.list(path).filter { it.isDir || isVideoFile(it.name) }
         } catch (e: Exception) {
             error = e.message ?: "加载失败"
+            AppLog.error("WebDAV", error!!)
             entries = null
         }
         loading = false
+    }
+
+    // 从“继续观看”进入时，自动选中上次播放的文件
+    LaunchedEffect(entries, highlightHref) {
+        if (highlightHref != null && selected == null) {
+            selected = entries?.firstOrNull { it.href == highlightHref }
+        }
     }
 
     val onOpen: (DavEntry) -> Unit = { entry ->
@@ -87,25 +134,47 @@ fun BrowserScreen(client: DavClient, onExit: () -> Unit, onOpenSettings: () -> U
         }
     }
     val onRetry: () -> Unit = { reloadTick++ }
-    val onPlay: (DavEntry) -> Unit = { entry ->
-        // 交给 Swift + MobileVLCKit 播放，Kotlin 只负责传地址与认证信息
-        PlayerBridge.present(
-            url = client.url(entry.href),
-            title = entry.name,
-            user = client.authUser,
-            pass = client.authPass
-        )
-    }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
         val wide = maxWidth >= WideBreakpoint
+
+        val startPlay: (DavEntry) -> Unit = { entry ->
+            val saved = SourceStore.progressFor(source.id, entry.href)
+            val startMs = saved?.positionMs ?: 0L
+            // 保留上一次的进度和封面，播放器随后会持续回写
+            SourceStore.record(
+                sourceId = source.id,
+                path = entry.href,
+                name = entry.name,
+                positionMs = startMs,
+                durationMs = saved?.durationMs ?: 0L,
+                coverPath = saved?.coverPath
+            )
+            if (wide) {
+                // 横屏：右侧内嵌播放
+                playing = entry
+            } else {
+                // 竖屏：和 Android 一样全屏播放
+                PlayerBridge.present(
+                    url = client.url(entry.href),
+                    title = entry.name,
+                    user = client.authUser,
+                    pass = client.authPass,
+                    startMs = startMs,
+                    sourceId = source.id,
+                    path = entry.href
+                )
+            }
+        }
 
         if (wide) {
             // iPad / 横屏：左侧目录树固定 380，右侧详情/播放区
             Row(Modifier.fillMaxSize()) {
                 Column(Modifier.width(380.dp).fillMaxHeight().background(SurfaceBg)) {
                     SidebarHeader(
-                        title = decodeName(path),
+                        source = source,
+                        sources = SourceStore.sources,
+                        onSwitchSource = onSwitchSource,
                         pathText = path,
                         canGoUp = stack.size > 1,
                         onUp = onUp,
@@ -121,21 +190,39 @@ fun BrowserScreen(client: DavClient, onExit: () -> Unit, onOpenSettings: () -> U
                         selectedHref = selected?.href,
                         onRetry = onRetry,
                         onOpen = onOpen,
+                        state = listState,
                         modifier = Modifier.weight(1f)
                     )
                 }
                 Box(Modifier.width(1.dp).fillMaxHeight().background(Hairline))
-                DetailPane(
-                    entry = selected,
-                    onPlay = { selected?.let(onPlay) },
-                    modifier = Modifier.weight(1f)
-                )
+                if (playing != null) {
+                    InlinePlayerPane(
+                        entry = playing!!,
+                        url = client.url(playing!!.href),
+                        user = client.authUser,
+                        pass = client.authPass,
+                        sourceId = source.id,
+                        startMs = SourceStore.progressFor(source.id, playing!!.href)?.positionMs ?: 0L,
+                        onPickSubtitle = { showSubtitlePicker = true },
+                        onClose = { playing = null },
+                        modifier = Modifier.weight(1f)
+                    )
+                } else {
+                    DetailPane(
+                        entry = selected,
+                        onPlay = { selected?.let(startPlay) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         } else {
             // 手机 / 窄窗口：单列
             Column(Modifier.fillMaxSize()) {
                 PhoneTopBar(
-                    title = decodeName(path),
+                    source = source,
+                    sources = SourceStore.sources,
+                    onSwitchSource = onSwitchSource,
+                    subtitle = path,
                     canGoUp = stack.size > 1,
                     onUp = onUp,
                     onRefresh = onRetry,
@@ -150,11 +237,24 @@ fun BrowserScreen(client: DavClient, onExit: () -> Unit, onOpenSettings: () -> U
                     selectedHref = selected?.href,
                     onRetry = onRetry,
                     onOpen = onOpen,
+                    state = listState,
                     modifier = Modifier.weight(1f)
                 )
-                selected?.let { BottomHint(it, onPlay = { onPlay(it) }) }
+                selected?.let { BottomHint(it, onPlay = { startPlay(it) }) }
             }
         }
+    }
+
+    if (showSubtitlePicker && playing != null) {
+        SubtitlePickerDialog(
+            client = client,
+            videoPath = playing!!.href,
+            onDismiss = { showSubtitlePicker = false },
+            onSelect = { entry ->
+                PlayerBridge.setSubtitle(client.url(entry.href))
+                showSubtitlePicker = false
+            }
+        )
     }
 }
 
@@ -166,13 +266,14 @@ private fun DirectoryList(
     selectedHref: String?,
     onRetry: () -> Unit,
     onOpen: (DavEntry) -> Unit,
+    state: LazyListState,
     modifier: Modifier = Modifier
 ) {
     when {
         loading -> LoadingState(modifier)
         error != null -> ErrorState(error, onRetry, modifier)
         entries.isNullOrEmpty() -> EmptyState("空目录", modifier)
-        else -> LazyColumn(modifier) {
+        else -> LazyColumn(state = state, modifier = modifier) {
             items(entries.orEmpty(), key = { it.href }) { entry ->
                 DavRow(
                     entry = entry,
@@ -186,7 +287,9 @@ private fun DirectoryList(
 
 @Composable
 private fun SidebarHeader(
-    title: String,
+    source: DavSource,
+    sources: List<DavSource>,
+    onSwitchSource: (DavSource) -> Unit,
     pathText: String,
     canGoUp: Boolean,
     onUp: () -> Unit,
@@ -196,16 +299,11 @@ private fun SidebarHeader(
 ) {
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                title,
-                fontSize = 19.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
+            Box(Modifier.weight(1f)) {
+                SourceTitle(source, sources, onSwitchSource, 17.sp)
+            }
             TextButton(onClick = onOpenSettings) { Text("设置", fontSize = 12.sp, color = Muted) }
-            TextButton(onClick = onExit) { Text("换源", fontSize = 12.sp, color = Muted) }
+            TextButton(onClick = onExit) { Text("源管理", fontSize = 12.sp, color = Muted) }
         }
         Text(
             pathText,
@@ -226,7 +324,10 @@ private fun SidebarHeader(
 
 @Composable
 private fun PhoneTopBar(
-    title: String,
+    source: DavSource,
+    sources: List<DavSource>,
+    onSwitchSource: (DavSource) -> Unit,
+    subtitle: String,
     canGoUp: Boolean,
     onUp: () -> Unit,
     onRefresh: () -> Unit,
@@ -240,17 +341,19 @@ private fun PhoneTopBar(
         TextButton(onClick = onUp, enabled = canGoUp) {
             Text("←", fontSize = 18.sp, color = if (canGoUp) Brand else Muted)
         }
-        Text(
-            title,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
+        Column(Modifier.weight(1f)) {
+            SourceTitle(source, sources, onSwitchSource, 15.sp)
+            Text(
+                subtitle,
+                fontSize = 10.sp,
+                color = Muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
         TextButton(onClick = onRefresh) { Text("刷新", fontSize = 12.sp, color = Muted) }
         TextButton(onClick = onOpenSettings) { Text("⚙", fontSize = 15.sp, color = Muted) }
-        TextButton(onClick = onExit) { Text("换源", fontSize = 12.sp, color = Muted) }
+        TextButton(onClick = onExit) { Text("源管理", fontSize = 12.sp, color = Muted) }
     }
 }
 
@@ -296,6 +399,154 @@ private fun DetailPane(entry: DavEntry?, onPlay: () -> Unit, modifier: Modifier 
             Button(onClick = onPlay, shape = RoundedCornerShape(999.dp)) {
                 Text("播放")
             }
+        }
+    }
+}
+
+@Composable
+private fun SubtitlePickerDialog(
+    client: DavClient,
+    videoPath: String,
+    onDismiss: () -> Unit,
+    onSelect: (DavEntry) -> Unit
+) {
+    var entries by remember { mutableStateOf<List<DavEntry>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    val dir = remember(videoPath) {
+        val parent = videoPath.trimEnd('/').substringBeforeLast('/', "")
+        if (parent.isBlank()) "/" else "$parent/"
+    }
+
+    LaunchedEffect(dir) {
+        runCatching { client.list(dir) }
+            .onSuccess { list ->
+                entries = list.filter { entry ->
+                    !entry.isDir &&
+                        entry.name.substringAfterLast('.', "").lowercase() in SubtitleExts
+                }
+            }
+            .onFailure { error = it.message ?: "加载失败" }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择外挂字幕") },
+        text = {
+            when {
+                error != null -> Text("加载失败：$error", color = Danger, fontSize = 12.sp)
+                entries == null -> Box(
+                    Modifier.fillMaxWidth().padding(20.dp),
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator(color = Brand) }
+                entries!!.isEmpty() -> Text(
+                    "视频目录里没有 srt/ass/ssa/vtt 字幕",
+                    color = Muted,
+                    fontSize = 12.sp
+                )
+                else -> LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                    items(entries!!) { entry ->
+                        Text(
+                            entry.name,
+                            fontSize = 13.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(entry) }
+                                .padding(vertical = 10.dp)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+@Composable
+private fun SourceTitle(
+    source: DavSource,
+    sources: List<DavSource>,
+    onSelect: (DavSource) -> Unit,
+    fontSize: TextUnit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }) {
+            Text(
+                source.name,
+                fontSize = fontSize,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(" ▾", fontSize = 11.sp, color = Muted)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            sources.forEach { item ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            item.name,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    trailingIcon = {
+                        if (item.id == source.id) Text("✓", color = Brand)
+                    },
+                    onClick = {
+                        expanded = false
+                        onSelect(item)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InlinePlayerPane(
+    entry: DavEntry,
+    url: String,
+    user: String,
+    pass: String,
+    sourceId: String,
+    startMs: Long,
+    onPickSubtitle: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier.fillMaxHeight()) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    entry.name,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text("内嵌播放 · 右上角可全屏", fontSize = 10.sp, color = Muted)
+            }
+            TextButton(onClick = onPickSubtitle) { Text("字幕", fontSize = 12.sp, color = Muted) }
+            TextButton(onClick = onClose) { Text("关闭", fontSize = 12.sp, color = Muted) }
+        }
+        HorizontalDivider(color = Hairline, thickness = 1.dp)
+        key(entry.href) {
+            InlinePlayerHost(
+                url = url,
+                title = entry.name,
+                user = user,
+                pass = pass,
+                sourceId = sourceId,
+                path = entry.href,
+                startMs = startMs,
+                modifier = Modifier.weight(1f).fillMaxWidth()
+            )
         }
     }
 }

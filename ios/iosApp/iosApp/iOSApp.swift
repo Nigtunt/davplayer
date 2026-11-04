@@ -17,6 +17,8 @@ struct DavPlayerIosApp: App {
     init() {
         // 把 Swift 的 VLCKit 播放器注册给 Kotlin 的 PlayerBridge
         PlayerBridge.shared.presenter = SwiftPlayerPresenter()
+        // 横屏右侧的内嵌播放器
+        PlayerBridge.shared.inlinePresenter = SwiftInlinePresenter()
     }
 
     var body: some Scene {

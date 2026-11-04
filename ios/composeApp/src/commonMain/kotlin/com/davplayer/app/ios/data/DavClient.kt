@@ -71,15 +71,18 @@ class DavClient(baseUrl: String, private val user: String, private val pass: Str
         val xml = response.bodyAsText()
 
         if (status !in 200..299) {
+            AppLog.error("WebDAV", "PROPFIND $path -> HTTP $status")
             throw IllegalStateException("WebDAV 请求失败：HTTP $status")
         }
         // 不是 multistatus 说明拿到的是登录页/网页/错误页，而不是目录列表，
         // 直接报出来，避免“无报错但空列表”这种无法排查的状态
         if (!xml.contains("multistatus", ignoreCase = true)) {
+            AppLog.error("WebDAV", "非 WebDAV 响应 HTTP $status：$path")
             throw IllegalStateException("服务器返回的不是 WebDAV 目录（HTTP $status，${xml.length} 字节）")
         }
         println("[dav] PROPFIND ${url(path)} -> HTTP $status, ${xml.length} chars")
         val entries = parseMultiStatus(xml, path)
+        AppLog.info("WebDAV", "PROPFIND $path -> ${entries.size} 项")
         println("[dav] parsed ${entries.size} entries")
         if (entries.isEmpty()) {
             println("[dav] body head: ${xml.take(600).replace('\n', ' ')}")

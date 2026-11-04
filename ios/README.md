@@ -128,18 +128,34 @@ CI 步骤：Kotlin framework → xcodegen → `pod install` → `xcodebuild`（w
 
 | 方案 | 有效期 | 说明 |
 |---|---|---|
-| **AltStore / SideStore**（推荐） | 7 天，可自动续签 | Windows 需安装 **Apple 官网版 iTunes**（不是 Microsoft Store 版） |
+| **AltStore + AltServer 常开**（本方案） | 7 天，自动续签 | Windows 需 **Apple 官网版 iTunes/iCloud**（不是 Microsoft Store 版） |
+| SideStore | 7 天 | 设备端续签，需配对文件 + StosVPN |
 | Sideloadly | 7 天 | 手动重签，适合偶尔更新 |
 
-步骤：
+### Windows 侧（已完成）
 
-1. iPad「设置 → 隐私与安全性 → 开发者模式」打开开发者模式
-2. Windows 安装 AltServer（需官网版 iTunes），iPad 与电脑同一局域网
-3. AltServer 托盘 → Install AltStore → 输入 Apple ID
-4. 把 `DavPlayer-unsigned.ipa` 拖进 AltStore 安装（AltStore 会重新签名，VLCKit 这类内嵌 framework 也会一并签）
-5. 首次启动如提示「不受信任的开发者」，去「设置 → 通用 → VPN 与设备管理」信任
+1. 卸载 Microsoft Store 版 iTunes（AltServer 不识别）
+2. 安装官网版：
+   ```powershell
+   winget install --id Apple.iTunes -e
+   winget install --id Apple.iCloud -e
+   winget install --id Apple.AppleMobileDeviceSupport -e   # iTunes 有时不装这个，必须补
+   winget install --id RileyTestut.AltServer -e
+   ```
+3. 确认服务在跑：`Get-Service "Apple Mobile Device Service"` → Running
+4. AltServer 安装包会自动写入 `HKCU\...\Run`（登录自启），**保持常开、不要退出**；电脑设为交流电不睡眠、与 iPad 同一 Wi-Fi
+5. 防火墙放行 AltServer（入站/出站，专用网络）
 
-续签只是重新签名，App 数据（WebDAV 源、播放进度）保留。
+### iPad 侧（首次）
+
+1. 设置 → 隐私与安全性 → **开发者模式** → 打开并重启
+2. USB 连接电脑并「信任此电脑」
+3. AltServer 托盘图标 → **Install AltStore** → 选择 iPad → 输入 Apple ID（免费账号即可）
+4. iPad 上「设置 → 通用 → VPN 与设备管理」信任 AltStore
+5. 把 `DavPlayer-unsigned.ipa` 传到 iPad（AirDrop / iCloud Drive / 文件 App），在 AltStore「My Apps → +」选择它安装
+6. AltStore 设置里打开 **Background Refresh**；保持 iPad 与电脑同一 Wi-Fi，7 天内会自动续签
+
+免费账号限制：最多 3 个 App、每 7 天 10 个 App ID；续签只重新签名，WebDAV 源与播放进度保留。
 
 ---
 

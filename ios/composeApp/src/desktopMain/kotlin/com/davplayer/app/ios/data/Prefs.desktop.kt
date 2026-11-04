@@ -12,3 +12,11 @@ actual fun writePrivacyMode(enabled: Boolean) {
     prefs.putBoolean(KEY_PRIVACY, enabled)
     if (!enabled) PrivacyLock.locked = false
 }
+
+actual fun readSetting(key: String): String? = prefs.get(key, null)
+
+actual fun writeSetting(key: String, value: String) {
+    prefs.put(key, value)
+}
+
+actual fun nowMillis(): Long = System.currentTimeMillis()

@@ -60,6 +60,12 @@ class DavParserTest {
     }
 
     @Test
+    fun percentEncodingRoundTrip() {
+        val raw = "中文/电影\t合集 2025.mkv"
+        assertEquals(raw, percentDecode(percentEncode(raw)))
+    }
+
+    @Test
     fun decodesPercentEncodedName() {
         val xml = """
             <D:multistatus xmlns:D="DAV:">
