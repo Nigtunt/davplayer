@@ -4,12 +4,8 @@ name: ios-ipa
 # AltStore / Sideloadly（免费 Apple ID，7 天续签）
 # 目标机 iPadOS 17.7.11 > 16.6.1，TrollStore 不可用
 on:
+  # 改用 Codemagic 构建；GitHub runner 仅保留手动触发作为备用
   workflow_dispatch:
-  push:
-    branches: [ main ]
-    paths:
-      - "ios/**"
-      - ".github/workflows/ios.yml"
 
 jobs:
   build:
