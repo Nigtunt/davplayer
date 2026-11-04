@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import MobileVLCKit
 import UIKit
+import ComposeApp
 
 /// 封装 VLCMediaPlayer，只暴露 SwiftUI 需要的状态与操作。
 /// 注意：VLCKit 的调用尽量都放在主线程，delegate 回调统一回主线程。
@@ -33,6 +34,7 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
     private var coverPath: String?
     private var coverAttempted = false
     private var lastReportAt: TimeInterval = 0
+    private var resolveTask: URLSessionDataTask?
 
     override init() {
         super.init()
@@ -53,7 +55,19 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
         coverAttempted = false
         lastReportAt = 0
         activateAudioSession()
-        playCurrent()
+
+        // OpenList/AList 播放网盘文件时会 302 到网盘直链。
+        // VLC 自己跟随时不一定会带对 UA/鉴权；这里先用 URLSession 跟到最终地址再交给 VLC。
+        resolveTask?.cancel()
+        resolveRedirect(url: url, user: user, pass: pass) { [weak self] finalURL in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let finalURL {
+                    self.mediaURL = finalURL
+                }
+                self.playCurrent()
+            }
+        }
     }
 
     func retry() {
@@ -61,6 +75,8 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
     }
 
     func stop() {
+        resolveTask?.cancel()
+        resolveTask = nil
         // 退出前再报一次最终进度
         onProgress?(currentTime, duration, coverPath)
         player.stop()
@@ -116,7 +132,12 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
 
         let media = VLCMedia(url: url)
         // WebDAV 走网络，给一点缓冲；Basic 认证用 media option，避免密码出现在 URL 里
-        var options: [AnyHashable: Any] = ["network-caching": 2000]
+        var options: [AnyHashable: Any] = [
+            "network-caching": 2000,
+            // 和 Android 端一样带浏览器 UA，部分网盘直链会校验 UA
+            "http-user-agent": "Mozilla/5.0 (iPad; CPU OS 17_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+            "http-referrer": url.absoluteString
+        ]
         if !httpUser.isEmpty {
             options["http-user"] = httpUser
             options["http-pwd"] = httpPass
@@ -125,6 +146,39 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
 
         player.media = media
         player.play()
+    }
+
+    /// 跟随 302，拿到 OpenList 后面的网盘直链
+    private func resolveRedirect(
+        url: URL,
+        user: String,
+        pass: String,
+        completion: @escaping (URL?) -> Void
+    ) {
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "HEAD"
+        request.setValue(
+            "Mozilla/5.0 (iPad; CPU OS 17_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+            forHTTPHeaderField: "User-Agent"
+        )
+        if !user.isEmpty {
+            let token = Data("\(user):\(pass)".utf8).base64EncodedString()
+            request.setValue("Basic \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        let task = URLSession.shared.dataTask(with: request) { _, response, error in
+            let final = (response as? HTTPURLResponse)?.url
+            if let error {
+                PlayerBridge.shared.log(message: "重定向解析失败：\(error.localizedDescription)")
+            } else {
+                PlayerBridge.shared.log(
+                    message: "重定向：\(url.host ?? "?") -> \(final?.host ?? "same")"
+                )
+            }
+            completion(final)
+        }
+        resolveTask = task
+        task.resume()
     }
 
     /// 外挂字幕（WebDAV 上的 srt/ass/ssa/vtt）
