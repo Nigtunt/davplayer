@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +53,7 @@ import com.davplayer.app.ios.data.DavSource
 import com.davplayer.app.ios.data.SourceStore
 import com.davplayer.app.ios.data.isVideoFile
 import com.davplayer.app.ios.player.PlayerBridge
+import com.davplayer.app.ios.player.SubtitleOption
 import com.davplayer.app.ios.theme.Bg
 import com.davplayer.app.ios.theme.Brand
 import com.davplayer.app.ios.theme.Danger
@@ -59,6 +61,7 @@ import com.davplayer.app.ios.theme.Hairline
 import com.davplayer.app.ios.theme.Muted
 import com.davplayer.app.ios.theme.SurfaceBg
 import com.davplayer.app.ios.theme.SurfaceHigh
+import kotlinx.coroutines.launch
 
 /** 宽度达到这个值就切成 iPad 双栏 */
 private val WideBreakpoint = 840.dp
@@ -89,10 +92,11 @@ fun BrowserScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf<DavEntry?>(null) }
     var playing by remember { mutableStateOf<DavEntry?>(null) }
-    var showSubtitlePicker by remember { mutableStateOf(false) }
+    var playingSubtitles by remember { mutableStateOf<List<SubtitleOption>>(emptyList()) }
     var playError by remember { mutableStateOf<String?>(null) }
     var playPending by remember { mutableStateOf(false) }
     var reloadTick by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(playPending) {
         if (playPending) {
@@ -173,20 +177,25 @@ fun BrowserScreen(
                 durationMs = saved?.durationMs ?: 0L,
                 coverPath = saved?.coverPath
             )
-            if (wide) {
-                // 横屏：右侧内嵌播放
-                playing = entry
-            } else {
-                // 竖屏：和 Android 一样全屏播放
-                PlayerBridge.present(
-                    url = client.url(entry.href),
-                    title = entry.name,
-                    user = client.authUser,
-                    pass = client.authPass,
-                    startMs = startMs,
-                    sourceId = source.id,
-                    path = entry.href
-                )
+            scope.launch {
+                val subtitles = loadSubtitleOptions(client, entry.href)
+                if (wide) {
+                    // 横屏：右侧内嵌播放
+                    playingSubtitles = subtitles
+                    playing = entry
+                } else {
+                    // 竖屏：和 Android 一样全屏播放
+                    PlayerBridge.present(
+                        url = client.url(entry.href),
+                        title = entry.name,
+                        user = client.authUser,
+                        pass = client.authPass,
+                        startMs = startMs,
+                        sourceId = source.id,
+                        path = entry.href,
+                        subtitles = subtitles
+                    )
+                }
             }
         }
 
@@ -237,7 +246,7 @@ fun BrowserScreen(
                         pass = client.authPass,
                         sourceId = source.id,
                         startMs = SourceStore.progressFor(source.id, playing!!.href)?.positionMs ?: 0L,
-                        onPickSubtitle = { showSubtitlePicker = true },
+                        subtitles = playingSubtitles,
                         onClose = { playing = null },
                         modifier = Modifier.weight(1f)
                     )
@@ -303,17 +312,6 @@ fun BrowserScreen(
         )
     }
 
-    if (showSubtitlePicker && playing != null) {
-        SubtitlePickerDialog(
-            client = client,
-            videoPath = playing!!.href,
-            onDismiss = { showSubtitlePicker = false },
-            onSelect = { entry ->
-                PlayerBridge.setSubtitle(client.url(entry.href))
-                showSubtitlePicker = false
-            }
-        )
-    }
 }
 
 @Composable
@@ -571,7 +569,7 @@ private fun InlinePlayerPane(
     pass: String,
     sourceId: String,
     startMs: Long,
-    onPickSubtitle: () -> Unit,
+    subtitles: List<SubtitleOption>,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -590,7 +588,6 @@ private fun InlinePlayerPane(
                 )
                 Text("内嵌播放 · 右上角可全屏", fontSize = 10.sp, color = Muted)
             }
-            TextButton(onClick = onPickSubtitle) { Text("字幕", fontSize = 12.sp, color = Muted) }
             TextButton(onClick = onClose) { Text("关闭", fontSize = 12.sp, color = Muted) }
         }
         HorizontalDivider(color = Hairline, thickness = 1.dp)
@@ -603,6 +600,7 @@ private fun InlinePlayerPane(
                 sourceId = sourceId,
                 path = entry.href,
                 startMs = startMs,
+                subtitles = subtitles,
                 modifier = Modifier.weight(1f).fillMaxWidth()
             )
         }
@@ -628,4 +626,19 @@ private fun BottomHint(entry: DavEntry, onPlay: () -> Unit) {
             Text("播放", fontSize = 13.sp, color = Brand)
         }
     }
+}
+
+/** 和 Android 一样：默认列出视频同目录的 srt/ass/ssa/vtt */
+private suspend fun loadSubtitleOptions(
+    client: DavClient,
+    videoPath: String
+): List<SubtitleOption> {
+    val parent = videoPath.trimEnd('/').substringBeforeLast('/', "")
+    val dir = if (parent.isBlank()) "/" else "$parent/"
+    return runCatching { client.list(dir) }
+        .getOrDefault(emptyList())
+        .filter { entry ->
+            !entry.isDir && entry.name.substringAfterLast('.', "").lowercase() in SubtitleExts
+        }
+        .map { SubtitleOption(name = it.name, url = client.url(it.href)) }
 }

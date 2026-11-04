@@ -132,7 +132,7 @@ struct VLCPlayerScreen: View {
 
                 Spacer()
 
-                if controller.subtitleIndexes.count > 1 {
+                if !request.subtitles.isEmpty || controller.subtitleIndexes.count > 1 {
                     subtitleMenu
                 }
                 rateMenu
@@ -233,19 +233,46 @@ struct VLCPlayerScreen: View {
 
     private var subtitleMenu: some View {
         Menu {
-            ForEach(controller.subtitleIndexes.indices, id: \.self) { i in
-                let index = controller.subtitleIndexes[i]
-                let title = i < controller.subtitleTitles.count
-                    ? controller.subtitleTitles[i]
-                    : "字幕 \(i)"
-                Button {
-                    controller.selectSubtitle(index: index)
-                    scheduleHide()
-                } label: {
-                    if index == controller.currentSubtitleIndex {
-                        Label(title, systemImage: "checkmark")
-                    } else {
-                        Text(title)
+            Button {
+                controller.selectSubtitle(index: -1)
+                scheduleHide()
+            } label: {
+                if controller.currentSubtitleIndex < 0 {
+                    Label("关闭字幕", systemImage: "checkmark")
+                } else {
+                    Text("关闭字幕")
+                }
+            }
+
+            if !controller.subtitleIndexes.isEmpty {
+                Divider()
+                ForEach(controller.subtitleIndexes.indices, id: \.self) { i in
+                    let index = controller.subtitleIndexes[i]
+                    let title = i < controller.subtitleTitles.count
+                        ? controller.subtitleTitles[i]
+                        : "字幕 \(i)"
+                    Button {
+                        controller.selectSubtitle(index: index)
+                        scheduleHide()
+                    } label: {
+                        if index == controller.currentSubtitleIndex {
+                            Label(title, systemImage: "checkmark")
+                        } else {
+                            Text(title)
+                        }
+                    }
+                }
+            }
+
+            if !request.subtitles.isEmpty {
+                Divider()
+                Text("外挂字幕")
+                ForEach(request.subtitles, id: \.url) { sub in
+                    Button {
+                        controller.loadSubtitle(sub.url)
+                        scheduleHide()
+                    } label: {
+                        Text(sub.name)
                     }
                 }
             }

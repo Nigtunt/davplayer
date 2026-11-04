@@ -22,11 +22,18 @@ interface PlayerPresenter {
         pass: String,
         startMs: Long,
         sourceId: String,
-        path: String
+        path: String,
+        subtitles: List<SubtitleOption>
     )
 
     fun dismiss()
 }
+
+/** 视频同目录下的外挂字幕文件 */
+data class SubtitleOption(
+    val name: String,
+    val url: String
+)
 
 /** 窗口坐标（point），由 Compose 的 boundsInWindow 换算后传给 Swift */
 data class PlayerFrame(
@@ -49,6 +56,7 @@ interface InlinePresenter {
         startMs: Long,
         sourceId: String,
         path: String,
+        subtitles: List<SubtitleOption>,
         frame: PlayerFrame
     )
 
@@ -110,12 +118,13 @@ object PlayerBridge {
         pass: String,
         startMs: Long,
         sourceId: String,
-        path: String
+        path: String,
+        subtitles: List<SubtitleOption> = emptyList()
     ) {
         registerSession(url, sourceId, path, title)
         resetPlayerPresented()
-        AppLog.info("Player", "全屏播放：$title @ ${startMs / 1000}s")
-        presenter?.present(url, title, user, pass, startMs, sourceId, path)
+        AppLog.info("Player", "全屏播放：$title @ ${startMs / 1000}s，字幕 ${subtitles.size} 条")
+        presenter?.present(url, title, user, pass, startMs, sourceId, path, subtitles)
     }
 
     fun dismiss() {

@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import com.davplayer.app.ios.data.AppLog
 import com.davplayer.app.ios.player.PlayerBridge
 import com.davplayer.app.ios.player.PlayerFrame
+import com.davplayer.app.ios.player.SubtitleOption
 
 /**
  * 右侧内嵌播放器占位。
@@ -35,6 +36,7 @@ fun InlinePlayerHost(
     sourceId: String,
     path: String,
     startMs: Long = 0L,
+    subtitles: List<SubtitleOption> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current.density
@@ -73,7 +75,17 @@ fun InlinePlayerHost(
         if (!shown) {
             PlayerBridge.registerSession(url, sourceId, path, title)
             AppLog.info("Player", "内嵌播放：$title @ ${startMs / 1000}s")
-            PlayerBridge.inlinePresenter?.show(url, title, user, pass, startMs, sourceId, path, current)
+            PlayerBridge.inlinePresenter?.show(
+                url,
+                title,
+                user,
+                pass,
+                startMs,
+                sourceId,
+                path,
+                subtitles,
+                current
+            )
             shown = true
         }
     }

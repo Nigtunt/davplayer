@@ -21,7 +21,6 @@ import platform.CoreGraphics.CGImageGetHeight
 import platform.CoreGraphics.CGImageGetWidth
 import platform.CoreGraphics.CGRectMake
 import platform.CoreGraphics.CGSizeMake
-import platform.CoreGraphics.kCGBitmapByteOrder32Little
 import platform.Foundation.NSData
 import platform.Foundation.dataWithBytes
 import platform.UIKit.UIImage
@@ -66,9 +65,8 @@ actual fun decodeImageBitmap(bytes: ByteArray, maxWidth: Int): ImageBitmap? {
     if (pixelWidth <= 0 || pixelHeight <= 0) return null
 
     val colorSpace = CGColorSpaceCreateDeviceRGB()
-    // kCGImageAlphaPremultipliedFirst = 2；Kotlin/Native 里 alpha 常量不是顶层值，
-    // kCGBitmapByteOrder32Little 本身就是 UInt32，直接按位组合成 BGRA。
-    val bitmapInfo = kCGBitmapByteOrder32Little or 2u
+    // BGRA：byteOrder32Little (2 << 12 = 8192) | alphaPremultipliedFirst (2)
+    val bitmapInfo: UInt32 = 8194u
     val context = CGBitmapContextCreate(
         data = null,
         width = pixelWidth.toULong(),

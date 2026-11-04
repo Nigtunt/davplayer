@@ -28,6 +28,7 @@ final class InlinePlayerHost: NSObject {
         startMs: Int64,
         sourceId: String,
         path: String,
+        subtitles: [SubtitleOption],
         frame: PlayerFrame
     ) {
         DispatchQueue.main.async { [weak self] in
@@ -42,6 +43,7 @@ final class InlinePlayerHost: NSObject {
             let root = InlinePlayerView(
                 controller: controller,
                 title: title,
+                subtitles: subtitles,
                 onToggleFullscreen: { [weak self] full in self?.setFullscreen(full) }
             )
             let host = InlineHostingController(rootView: root)
@@ -168,6 +170,7 @@ final class SwiftInlinePresenter: NSObject, InlinePresenter {
         startMs: Int64,
         sourceId: String,
         path: String,
+        subtitles: [SubtitleOption],
         frame: PlayerFrame
     ) {
         InlinePlayerHost.shared.show(
@@ -178,6 +181,7 @@ final class SwiftInlinePresenter: NSObject, InlinePresenter {
             startMs: startMs,
             sourceId: sourceId,
             path: path,
+            subtitles: subtitles,
             frame: frame
         )
     }
@@ -200,6 +204,7 @@ final class SwiftInlinePresenter: NSObject, InlinePresenter {
 private struct InlinePlayerView: View {
     @ObservedObject var controller: VLCPlayerController
     let title: String
+    let subtitles: [SubtitleOption]
     let onToggleFullscreen: (Bool) -> Void
 
     @State private var fullscreen = false
@@ -282,7 +287,7 @@ private struct InlinePlayerView: View {
 
                 Spacer()
 
-                if controller.subtitleIndexes.count > 1 {
+                if !subtitles.isEmpty || controller.subtitleIndexes.count > 1 {
                     subtitleMenu
                 }
                 rateMenu
@@ -396,19 +401,46 @@ private struct InlinePlayerView: View {
 
     private var subtitleMenu: some View {
         Menu {
-            ForEach(controller.subtitleIndexes.indices, id: \.self) { i in
-                let index = controller.subtitleIndexes[i]
-                let name = i < controller.subtitleTitles.count
-                    ? controller.subtitleTitles[i]
-                    : "字幕 \(i)"
-                Button {
-                    controller.selectSubtitle(index: index)
-                    scheduleHide()
-                } label: {
-                    if index == controller.currentSubtitleIndex {
-                        Label(name, systemImage: "checkmark")
-                    } else {
-                        Text(name)
+            Button {
+                controller.selectSubtitle(index: -1)
+                scheduleHide()
+            } label: {
+                if controller.currentSubtitleIndex < 0 {
+                    Label("关闭字幕", systemImage: "checkmark")
+                } else {
+                    Text("关闭字幕")
+                }
+            }
+
+            if !controller.subtitleIndexes.isEmpty {
+                Divider()
+                ForEach(controller.subtitleIndexes.indices, id: \.self) { i in
+                    let index = controller.subtitleIndexes[i]
+                    let name = i < controller.subtitleTitles.count
+                        ? controller.subtitleTitles[i]
+                        : "字幕 \(i)"
+                    Button {
+                        controller.selectSubtitle(index: index)
+                        scheduleHide()
+                    } label: {
+                        if index == controller.currentSubtitleIndex {
+                            Label(name, systemImage: "checkmark")
+                        } else {
+                            Text(name)
+                        }
+                    }
+                }
+            }
+
+            if !subtitles.isEmpty {
+                Divider()
+                Text("外挂字幕")
+                ForEach(subtitles, id: \.url) { sub in
+                    Button {
+                        controller.loadSubtitle(sub.url)
+                        scheduleHide()
+                    } label: {
+                        Text(sub.name)
                     }
                 }
             }

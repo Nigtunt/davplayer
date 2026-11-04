@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
@@ -23,7 +24,13 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -56,11 +64,11 @@ import com.davplayer.app.ios.theme.SurfaceBg
 import com.davplayer.app.ios.theme.SurfaceHigh
 
 /** 与 Android 端一致的四个顶层入口 */
-enum class AppTab(val label: String, val icon: String) {
-    Browse("浏览", "B"),
-    Komga("漫画", "M"),
-    History("历史", "H"),
-    Settings("我的", "S")
+enum class AppTab(val label: String, val icon: ImageVector) {
+    Browse("浏览", Icons.Filled.Folder),
+    Komga("漫画", Icons.Filled.MenuBook),
+    History("历史", Icons.Filled.History),
+    Settings("我的", Icons.Filled.Settings)
 }
 
 /** 宽度达到这个值切横屏双栏（左 tab 栏 + 右内容） */
@@ -210,7 +218,12 @@ private fun TabRail(selected: AppTab, onSelect: (AppTab) -> Unit) {
                     .padding(vertical = 13.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(tab.icon, fontSize = 20.sp)
+                Icon(
+                    imageVector = tab.icon,
+                    contentDescription = tab.label,
+                    tint = if (active) Brand else Muted,
+                    modifier = Modifier.size(21.dp)
+                )
                 Spacer(Modifier.height(3.dp))
                 Text(
                     tab.label,
@@ -242,7 +255,12 @@ private fun BottomTabs(selected: AppTab, onSelect: (AppTab) -> Unit) {
                     Modifier.clickable { onSelect(tab) }.padding(horizontal = 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(tab.icon, fontSize = 17.sp)
+                    Icon(
+                        imageVector = tab.icon,
+                        contentDescription = tab.label,
+                        tint = if (active) Brand else Muted,
+                        modifier = Modifier.size(19.dp)
+                    )
                     Text(
                         tab.label,
                         fontSize = 10.sp,

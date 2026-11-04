@@ -12,6 +12,7 @@ struct PlayRequest: Identifiable {
     let user: String
     let pass: String
     let startMs: Int64
+    let subtitles: [SubtitleOption]
 }
 
 /// 播放器呈现协调器：直接把 SwiftUI 播放页以全窗口 overlay 加到 key window。
@@ -76,7 +77,8 @@ final class SwiftPlayerPresenter: NSObject, PlayerPresenter {
         pass: String,
         startMs: Int64,
         sourceId: String,
-        path: String
+        path: String,
+        subtitles: [SubtitleOption]
     ) {
         guard let parsed = URL(string: url) else {
             PlayerBridge.shared.log(message: "播放器：URL 无效 \(url)")
@@ -88,7 +90,8 @@ final class SwiftPlayerPresenter: NSObject, PlayerPresenter {
                 title: title,
                 user: user,
                 pass: pass,
-                startMs: startMs
+                startMs: startMs,
+                subtitles: subtitles
             )
         )
     }

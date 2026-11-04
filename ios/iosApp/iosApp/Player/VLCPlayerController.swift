@@ -185,6 +185,10 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
     func loadSubtitle(_ url: String) {
         guard let parsed = URL(string: url) else { return }
         player.addPlaybackSlave(parsed, type: .subtitle, enforce: true)
+        // 字幕 slave 解析是异步的，稍后刷新轨道列表供选择器显示
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.refreshTracks()
+        }
     }
 
     private func activateAudioSession() {

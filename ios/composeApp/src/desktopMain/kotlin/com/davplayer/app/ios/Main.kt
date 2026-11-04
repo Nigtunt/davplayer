@@ -6,6 +6,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.davplayer.app.ios.player.PlayerBridge
 import com.davplayer.app.ios.player.PlayerPresenter
+import com.davplayer.app.ios.player.SubtitleOption
 
 /**
  * 桌面预览入口：只用于在 Windows 上快速验证 Compose 界面与 WebDAV 逻辑。
@@ -20,9 +21,10 @@ fun main() = application {
             pass: String,
             startMs: Long,
             sourceId: String,
-            path: String
+            path: String,
+            subtitles: List<SubtitleOption>
         ) {
-            println("[desktop] play: $title @ ${startMs / 1000}s")
+            println("[desktop] play: $title @ ${startMs / 1000}s，字幕 ${subtitles.size} 条")
             println("[desktop] url : $url")
         }
 
