@@ -153,7 +153,9 @@ class WebDavClient(baseUrl: String, username: String, password: String) {
                                 DavEntry(
                                     name = display,
                                     href = h,
-                                    isDir = isDir,
+                                    // 部分服务端（AList 某些存储）不返回 <collection/>，
+                                    // 目录 href 一定以 "/" 结尾，用这个兜底
+                                    isDir = isDir || h.endsWith("/"),
                                     size = size.toString().trim().toLongOrNull() ?: 0L
                                 )
                             )

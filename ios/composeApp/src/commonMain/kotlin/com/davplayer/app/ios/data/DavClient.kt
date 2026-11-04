@@ -78,47 +78,63 @@ class DavClient(baseUrl: String, private val user: String, private val pass: Str
         if (!xml.contains("multistatus", ignoreCase = true)) {
             throw IllegalStateException("服务器返回的不是 WebDAV 目录（HTTP $status，${xml.length} 字节）")
         }
-        parseMultiStatus(xml, path)
-    }
-
-    private fun parseMultiStatus(xml: String, requestedPath: String): List<DavEntry> {
-        val responseRegex = Regex(
-            "<(?:[\\w.-]+:)?response[^>]*>(.*?)</(?:[\\w.-]+:)?response>",
-            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
-        )
-        val collectionRegex = Regex("<(?:[\\w.-]+:)?collection\\s*/?>", RegexOption.IGNORE_CASE)
-
-        return responseRegex.findAll(xml).mapNotNull { match ->
-            val block = match.groupValues[1]
-            val rawHref = tagText(block, "href")?.trim().orEmpty()
-            if (rawHref.isEmpty()) return@mapNotNull null
-
-            val href = davPathOf(rawHref)
-            if (href.trimEnd('/') == requestedPath.trimEnd('/')) return@mapNotNull null
-
-            val display = tagText(block, "displayname")?.trim().orEmpty()
-            val name = display.ifBlank {
-                percentDecode(href.trimEnd('/').substringAfterLast('/'))
-            }
-            DavEntry(
-                name = name,
-                href = href,
-                isDir = collectionRegex.containsMatchIn(block),
-                size = tagText(block, "getcontentlength")?.trim()?.toLongOrNull() ?: 0L
-            )
+        println("[dav] PROPFIND ${url(path)} -> HTTP $status, ${xml.length} chars")
+        val entries = parseMultiStatus(xml, path)
+        println("[dav] parsed ${entries.size} entries")
+        if (entries.isEmpty()) {
+            println("[dav] body head: ${xml.take(600).replace('\n', ' ')}")
+        } else {
+            entries.take(5).forEach { println("[dav] entry: ${it.name} dir=${it.isDir} href=${it.href}") }
         }
-            .sortedWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
-            .toList()
-    }
-
-    private fun tagText(xml: String, tag: String): String? {
-        val regex = Regex(
-            "<(?:[\\w.-]+:)?$tag[^>]*>(.*?)</(?:[\\w.-]+:)?$tag>",
-            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
-        )
-        return regex.find(xml)?.groupValues?.get(1)
+        entries
     }
 }
+
+/**
+ * 解析 WebDAV 的 207 Multi-Status。
+ * 抽成顶层函数是为了能直接做单元测试（desktopTest），避免再出现
+ * “安卓能跑、iOS 空列表”这种平台分叉。
+ */
+internal fun parseMultiStatus(xml: String, requestedPath: String): List<DavEntry> {
+    val responseRegex = Regex(
+        "<(?:[\\w.-]+:)?response[^>]*>(.*?)</(?:[\\w.-]+:)?response>",
+        setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
+    )
+    val collectionRegex = Regex("<(?:[\\w.-]+:)?collection\\s*/?>", RegexOption.IGNORE_CASE)
+
+    return responseRegex.findAll(xml).mapNotNull { match ->
+        val block = match.groupValues[1]
+        val rawHref = tagText(block, "href")?.trim().orEmpty()
+        if (rawHref.isEmpty()) return@mapNotNull null
+
+        val href = davPathOf(rawHref)
+        if (href.trimEnd('/') == requestedPath.trimEnd('/')) return@mapNotNull null
+
+        val display = tagText(block, "displayname")?.trim().orEmpty()
+        val name = display.ifBlank {
+            percentDecode(href.trimEnd('/').substringAfterLast('/'))
+        }
+        DavEntry(
+            name = name,
+            href = href,
+            // 部分 WebDAV 服务端（如 AList/OpenList 的某些存储）不返回 <collection/>，
+            // 但目录 href 一定以 "/" 结尾，用这个兜底
+            isDir = collectionRegex.containsMatchIn(block) || href.endsWith("/"),
+            size = tagText(block, "getcontentlength")?.trim()?.toLongOrNull() ?: 0L
+        )
+    }
+        .sortedWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
+        .toList()
+}
+
+private fun tagText(xml: String, tag: String): String? {
+    val regex = Regex(
+        "<(?:[\\w.-]+:)?$tag[^>]*>(.*?)</(?:[\\w.-]+:)?$tag>",
+        setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
+    )
+    return regex.find(xml)?.groupValues?.get(1)
+}
+
 
 /** 视频扩展名（与 Android 端保持一致） */
 val VIDEO_EXTS = setOf(
