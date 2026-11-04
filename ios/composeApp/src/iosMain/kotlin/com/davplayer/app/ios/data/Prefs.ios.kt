@@ -2,6 +2,7 @@ package com.davplayer.app.ios.data
 
 import platform.Foundation.NSDate
 import platform.Foundation.NSUserDefaults
+import platform.Foundation.timeIntervalSince1970
 
 private const val KEY_PRIVACY = "privacyMode"
 

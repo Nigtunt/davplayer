@@ -1,8 +1,9 @@
 package com.davplayer.app.ios.data
 
+import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ExperimentalForeignApi
-import kotlinx.cinterop.addressOf
-import kotlinx.cinterop.usePinned
+import kotlinx.cinterop.readBytes
+import kotlinx.cinterop.reinterpret
 import platform.Foundation.NSData
 import platform.Foundation.dataWithContentsOfFile
 
@@ -11,9 +12,6 @@ actual fun readFileBytes(path: String): ByteArray? {
     val data = NSData.dataWithContentsOfFile(path) ?: return null
     val length = data.length.toInt()
     if (length <= 0) return ByteArray(0)
-    val bytes = ByteArray(length)
-    bytes.usePinned { pinned ->
-        data.getBytes(pinned.addressOf(0), data.length)
-    }
-    return bytes
+    val raw = data.bytes ?: return null
+    return raw.reinterpret<ByteVar>().readBytes(length)
 }
