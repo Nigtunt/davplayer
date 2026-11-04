@@ -106,6 +106,11 @@ struct VLCPlayerScreen: View {
                 scheduleHide()
             }
         }
+        .onChange(of: controller.isBuffering) { buffering in
+            if !buffering {
+                scheduleHide()
+            }
+        }
     }
 
     // MARK: - 控制层
@@ -297,9 +302,10 @@ struct VLCPlayerScreen: View {
 
     private func scheduleHide() {
         hideWorkItem?.cancel()
-        // 暂停时不自动隐藏，和主流播放器一致
-        guard controller.isPlaying else { return }
+        // 不能在这里提前 return：onAppear 时 isPlaying 还是 false，
+        // 会导致控制栏永远不隐藏。改为 4 秒后检查。
         let item = DispatchWorkItem {
+            guard controller.isPlaying else { return }
             withAnimation(.easeInOut(duration: 0.25)) {
                 showControls = false
             }

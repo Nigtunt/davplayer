@@ -33,15 +33,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.davplayer.app.ios.data.ComicStore
 import com.davplayer.app.ios.data.DavSource
 import com.davplayer.app.ios.data.PlayProgress
 import com.davplayer.app.ios.data.SourceStore
+import com.davplayer.app.ios.data.decodeImageBitmap
 import com.davplayer.app.ios.data.readFileBytes
 import com.davplayer.app.ios.theme.Bg
 import com.davplayer.app.ios.theme.Brand
@@ -242,12 +243,14 @@ fun HistoryRow(item: PlayProgress, sourceName: String, onClick: () -> Unit) {
 /** 视频预览图：有截帧封面用封面，否则用渐变占位 + 扩展名 + 进度条 */
 @Composable
 private fun HistoryThumb(item: PlayProgress) {
-    val cover = remember(item.coverPath) {
-        item.coverPath?.let { path ->
-            readFileBytes(path)?.let { bytes ->
-                runCatching {
-                    org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap()
-                }.getOrNull()
+    val cover = remember(item.coverPath, ComicStore.safeMode) {
+        if (ComicStore.safeMode) {
+            null
+        } else {
+            item.coverPath?.let { path ->
+                readFileBytes(path)?.let { bytes ->
+                    decodeImageBitmap(bytes, 320)
+                }
             }
         }
     }

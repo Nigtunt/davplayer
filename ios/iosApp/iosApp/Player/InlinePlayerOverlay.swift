@@ -267,6 +267,9 @@ private struct InlinePlayerView: View {
         .onChange(of: controller.isPlaying) { playing in
             if playing { scheduleHide() }
         }
+        .onChange(of: controller.isBuffering) { buffering in
+            if !buffering { scheduleHide() }
+        }
     }
 
     private var controlsOverlay: some View {
@@ -452,8 +455,8 @@ private struct InlinePlayerView: View {
 
     private func scheduleHide() {
         hideWorkItem?.cancel()
-        guard controller.isPlaying else { return }
         let item = DispatchWorkItem {
+            guard controller.isPlaying else { return }
             withAnimation(.easeInOut(duration: 0.25)) {
                 showControls = false
             }

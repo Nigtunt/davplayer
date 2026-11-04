@@ -237,6 +237,12 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
     }
 
     private func syncTime() {
+        // 某些流上 state 回调只停在 buffering，但时间已经在走；以 isPlaying 为准修正 UI 状态
+        if player.isPlaying {
+            if isBuffering { isBuffering = false }
+            if !isPlaying { isPlaying = true }
+        }
+
         currentTime = max(0, Double(player.time.intValue) / 1000)
         if let length = player.media?.length.intValue, length > 0 {
             duration = Double(length) / 1000

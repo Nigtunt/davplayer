@@ -407,7 +407,7 @@ private fun ComicHistoryRow(item: ComicProgress, client: KomgaClient?, onClick: 
         Box(
             Modifier.width(62.dp).height(90.dp).clip(RoundedCornerShape(6.dp)).background(SurfaceHigh)
         ) {
-            if (client != null) {
+            if (client != null && !ComicStore.safeMode) {
                 KomgaImage(
                     url = client.bookThumbUrl(item.bookId),
                     auth = client.authHeader,
@@ -416,7 +416,7 @@ private fun ComicHistoryRow(item: ComicProgress, client: KomgaClient?, onClick: 
                 )
             } else {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("漫画", fontSize = 11.sp, color = Muted)
+                    Text("无图", fontSize = 11.sp, color = Muted)
                 }
             }
         }
