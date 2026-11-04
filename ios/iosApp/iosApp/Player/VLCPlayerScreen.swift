@@ -267,7 +267,8 @@ struct VLCPlayerScreen: View {
             if !request.subtitles.isEmpty {
                 Divider()
                 Text("外挂字幕")
-                ForEach(request.subtitles, id: \.url) { sub in
+                ForEach(request.subtitles.indices, id: \.self) { i in
+                    let sub = request.subtitles[i]
                     Button {
                         controller.loadSubtitle(sub.url)
                         scheduleHide()

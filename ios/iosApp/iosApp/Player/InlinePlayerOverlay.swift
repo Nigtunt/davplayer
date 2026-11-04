@@ -435,7 +435,8 @@ private struct InlinePlayerView: View {
             if !subtitles.isEmpty {
                 Divider()
                 Text("外挂字幕")
-                ForEach(subtitles, id: \.url) { sub in
+                ForEach(subtitles.indices, id: \.self) { i in
+                    let sub = subtitles[i]
                     Button {
                         controller.loadSubtitle(sub.url)
                         scheduleHide()
