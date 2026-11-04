@@ -28,7 +28,17 @@ data class ComicProgress(
 object ComicStore {
     private const val KEY_CONFIG = "komga.config.v1"
     private const val KEY_HISTORY = "comic.history.v1"
+    private const val KEY_SAFE_MODE = "komga.safeMode"
     private const val MAX_HISTORY = 200
+
+    /** 安全模式：不加载任何 Komga 图片，用于排查 iPad 上的 Skia 崩溃 */
+    var safeMode: Boolean by mutableStateOf(readSetting(KEY_SAFE_MODE) == "1")
+        private set
+
+    fun updateSafeMode(enabled: Boolean) {
+        safeMode = enabled
+        writeSetting(KEY_SAFE_MODE, if (enabled) "1" else "0")
+    }
 
     var config: KomgaConfig by mutableStateOf(loadConfig())
         private set

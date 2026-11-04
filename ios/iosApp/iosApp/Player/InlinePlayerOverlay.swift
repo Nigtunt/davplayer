@@ -31,7 +31,11 @@ final class InlinePlayerHost: NSObject {
         frame: PlayerFrame
     ) {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let parsed = URL(string: url), let window = self.keyWindow else { return }
+            guard let self else { return }
+            guard let parsed = URL(string: url), let window = self.keyWindow else {
+                PlayerBridge.shared.log(message: "内嵌播放：找不到 key window 或 URL")
+                return
+            }
             self.removeNow()
 
             let controller = VLCPlayerController()
@@ -58,6 +62,7 @@ final class InlinePlayerHost: NSObject {
             self.inlineFrame = rect
             self.isFullscreen = false
 
+            PlayerBridge.shared.log(message: "内嵌播放：\(title) frame=\(rect)")
             controller.onProgress = { position, duration, cover in
                 PlayerBridge.shared.reportProgress(
                     url: url,

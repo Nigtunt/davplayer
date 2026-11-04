@@ -69,6 +69,11 @@ object PlayerBridge {
         }
     }
 
+    /** Swift 侧写运行日志，方便在 App 内排查播放器问题 */
+    fun log(message: String) {
+        AppLog.info("iOS", message)
+    }
+
     /** Swift 每 5 秒、停止时回调；封面由 VLC 截图后传本地路径 */
     fun reportProgress(url: String, positionMs: Long, durationMs: Long, coverPath: String?) {
         val session = sessions[url] ?: return

@@ -411,7 +411,7 @@ private fun KomgaHome(
                                 .padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("📚", fontSize = 18.sp)
+                            Text("K", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.width(10.dp))
                             Text(
                                 library.name.ifBlank { "书库" },
@@ -1024,7 +1024,7 @@ private fun ReaderContent(
         if (mode != 2) {
             val next = pagerState.currentPage + 1
             if (next <= pages.lastIndex) {
-                KomgaImages.load(client.pageUrl(book.id, pages[next].number), client.authHeader)
+                KomgaImages.load(client.pageUrl(book.id, pages[next].number), client.authHeader, 1200)
             }
         }
     }
@@ -1238,7 +1238,8 @@ private fun ZoomablePage(
                     translationX = offset.x,
                     translationY = offset.y
                 ),
-            contentScale = contentScale
+            contentScale = contentScale,
+            maxWidth = 1200
         )
     }
 }

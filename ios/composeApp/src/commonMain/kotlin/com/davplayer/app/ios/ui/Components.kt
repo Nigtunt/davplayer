@@ -53,7 +53,7 @@ fun DavRow(
                 .background(if (entry.isDir) SurfaceBg else SurfaceHigh, RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Text(if (entry.isDir) "📁" else "🎬", fontSize = 15.sp)
+            Text(if (entry.isDir) "D" else "V", fontSize = 13.sp, color = Muted)
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {

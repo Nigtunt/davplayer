@@ -78,7 +78,9 @@ fun BrowserScreen(
         val restored = initialPath
             ?: SourceStore.lastPath(source.id)?.takeIf { it.startsWith(client.rootPath) }
             ?: client.rootPath
-        mutableStateOf(listOf(restored))
+        // 从历史/上次路径进入时，栈里要包含 root → 目标目录的完整层级，
+        // 否则 stack.size == 1，返回上级按钮永远是灰的
+        mutableStateOf(buildPathStack(client.rootPath, restored))
     }
     val scrollPositions = remember(source.id) { mutableMapOf<String, Int>() }
     var entries by remember { mutableStateOf<List<DavEntry>?>(null) }
@@ -87,6 +89,7 @@ fun BrowserScreen(
     var selected by remember { mutableStateOf<DavEntry?>(null) }
     var playing by remember { mutableStateOf<DavEntry?>(null) }
     var showSubtitlePicker by remember { mutableStateOf(false) }
+    var playError by remember { mutableStateOf<String?>(null) }
     var reloadTick by remember { mutableStateOf(0) }
 
     val path = stack.last()
@@ -130,8 +133,19 @@ fun BrowserScreen(
     BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
         val wide = maxWidth >= WideBreakpoint
 
-        val startPlay: (DavEntry) -> Unit = { entry ->
-            AppLog.info("UI", "点击视频：${entry.name}")
+        val startPlay: (DavEntry) -> Unit = play@ { entry ->
+            AppLog.info(
+                "UI",
+                "点击视频：${entry.name} wide=$wide presenter=${PlayerBridge.presenter != null} inline=${PlayerBridge.inlinePresenter != null}"
+            )
+            if (wide && PlayerBridge.inlinePresenter == null) {
+                playError = "内嵌播放器未注册（Swift 侧未初始化）"
+                return@play
+            }
+            if (!wide && PlayerBridge.presenter == null) {
+                playError = "全屏播放器未注册（Swift 侧未初始化）"
+                return@play
+            }
             val saved = SourceStore.progressFor(source.id, entry.href)
             val startMs = saved?.positionMs ?: 0L
             // 保留上一次的进度和封面，播放器随后会持续回写
@@ -249,6 +263,17 @@ fun BrowserScreen(
         }
     }
 
+    playError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { playError = null },
+            title = { Text("无法播放") },
+            text = { Text(message, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { playError = null }) { Text("好") }
+            }
+        )
+    }
+
     if (showSubtitlePicker && playing != null) {
         SubtitlePickerDialog(
             client = client,
@@ -356,7 +381,7 @@ private fun PhoneTopBar(
             )
         }
         TextButton(onClick = onRefresh) { Text("刷新", fontSize = 12.sp, color = Muted) }
-        TextButton(onClick = onOpenSettings) { Text("⚙", fontSize = 15.sp, color = Muted) }
+        TextButton(onClick = onOpenSettings) { Text("设置", fontSize = 12.sp, color = Muted) }
         TextButton(onClick = onExit) { Text("源管理", fontSize = 12.sp, color = Muted) }
     }
 }
@@ -497,7 +522,7 @@ private fun SourceTitle(
                         )
                     },
                     trailingIcon = {
-                        if (item.id == source.id) Text("✓", color = Brand)
+                        if (item.id == source.id) Text("√", color = Brand)
                     },
                     onClick = {
                         expanded = false

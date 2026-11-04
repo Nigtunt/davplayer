@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -89,6 +90,18 @@ fun KomgaSettingsCard() {
         if (saved) {
             Spacer(Modifier.height(8.dp))
             Text("已保存，切到「漫画」即可使用", fontSize = 11.sp, color = Brand)
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("安全模式", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("不加载漫画封面/页图，用于排查闪退", fontSize = 10.sp, color = Muted)
+            }
+            Switch(
+                checked = ComicStore.safeMode,
+                onCheckedChange = { ComicStore.updateSafeMode(it) }
+            )
         }
 
         Spacer(Modifier.height(10.dp))

@@ -57,10 +57,10 @@ import com.davplayer.app.ios.theme.SurfaceHigh
 
 /** 与 Android 端一致的四个顶层入口 */
 enum class AppTab(val label: String, val icon: String) {
-    Browse("浏览", "🗂"),
-    Komga("漫画", "📚"),
-    History("历史", "🕘"),
-    Settings("我的", "⚙")
+    Browse("浏览", "B"),
+    Komga("漫画", "M"),
+    History("历史", "H"),
+    Settings("我的", "S")
 }
 
 /** 宽度达到这个值切横屏双栏（左 tab 栏 + 右内容） */
