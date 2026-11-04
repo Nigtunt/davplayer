@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ComposeApp
 
 /// 全屏播放页：视频渲染交给 VLCKit，控制层用 SwiftUI
 struct VLCPlayerScreen: View {
