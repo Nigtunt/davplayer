@@ -13,8 +13,7 @@ on:
 
 jobs:
   build:
-    # arm64 池容量紧张；Intel 池同样可以交叉编译 iOS arm64，且更容易分配
-    runs-on: macos-15-intel
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
