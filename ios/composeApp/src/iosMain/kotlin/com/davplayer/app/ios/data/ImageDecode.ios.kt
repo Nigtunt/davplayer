@@ -66,7 +66,7 @@ actual fun decodeImageBitmap(bytes: ByteArray, maxWidth: Int): ImageBitmap? {
 
     val colorSpace = CGColorSpaceCreateDeviceRGB()
     // BGRA：byteOrder32Little (2 << 12 = 8192) | alphaPremultipliedFirst (2)
-    val bitmapInfo: UInt32 = 8194u
+    val bitmapInfo: UInt = 8194u
     val context = CGBitmapContextCreate(
         data = null,
         width = pixelWidth.toULong(),
