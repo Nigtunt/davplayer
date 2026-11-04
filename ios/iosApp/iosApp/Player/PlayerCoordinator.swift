@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import UIKit
+import SwiftUI
 import ComposeApp
 
 /// 一次播放请求：由 Kotlin 侧发起
