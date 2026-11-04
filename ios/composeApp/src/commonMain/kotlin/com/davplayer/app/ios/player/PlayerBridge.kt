@@ -1,5 +1,8 @@
 package com.davplayer.app.ios.player
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.davplayer.app.ios.data.AppLog
 import com.davplayer.app.ios.data.SourceStore
 
@@ -63,6 +66,19 @@ object PlayerBridge {
     var presenter: PlayerPresenter? = null
     var inlinePresenter: InlinePresenter? = null
 
+    /** Swift 把播放器视图真正加到窗口后置 true；Kotlin 用它做 3 秒超时判断 */
+    var playerPresented: Boolean by mutableStateOf(false)
+        private set
+
+    fun resetPlayerPresented() {
+        playerPresented = false
+    }
+
+    fun markPlayerPresented() {
+        playerPresented = true
+        AppLog.info("Player", "播放器已呈现在窗口")
+    }
+
     fun registerSession(url: String, sourceId: String, path: String, title: String) {
         if (sourceId.isNotBlank() && path.isNotBlank()) {
             sessions[url] = Session(sourceId, path, title)
@@ -97,6 +113,7 @@ object PlayerBridge {
         path: String
     ) {
         registerSession(url, sourceId, path, title)
+        resetPlayerPresented()
         AppLog.info("Player", "全屏播放：$title @ ${startMs / 1000}s")
         presenter?.present(url, title, user, pass, startMs, sourceId, path)
     }

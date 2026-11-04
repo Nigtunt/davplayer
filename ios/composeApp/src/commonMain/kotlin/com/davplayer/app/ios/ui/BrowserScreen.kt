@@ -96,8 +96,13 @@ fun BrowserScreen(
 
     LaunchedEffect(playPending) {
         if (playPending) {
-            kotlinx.coroutines.delay(2400)
-            playPending = false
+            kotlinx.coroutines.delay(3000)
+            if (PlayerBridge.playerPresented) {
+                playPending = false
+            } else {
+                playPending = false
+                playError = "播放器没有响应。请到「我的 → 运行日志」查看具体原因"
+            }
         }
     }
 
@@ -155,6 +160,7 @@ fun BrowserScreen(
                 playError = "全屏播放器未注册（Swift 侧未初始化）"
                 return@play
             }
+            PlayerBridge.resetPlayerPresented()
             playPending = true
             val saved = SourceStore.progressFor(source.id, entry.href)
             val startMs = saved?.positionMs ?: 0L

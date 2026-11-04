@@ -50,9 +50,13 @@ final class InlinePlayerHost: NSObject {
             let rect = CGRect(
                 x: frame.x,
                 y: frame.y,
-                width: max(frame.width, 1),
-                height: max(frame.height, 1)
+                width: frame.width,
+                height: frame.height
             )
+            guard rect.width > 10, rect.height > 10 else {
+                PlayerBridge.shared.log(message: "内嵌播放：frame 无效 \(rect)")
+                return
+            }
             host.view.frame = rect
             window.addSubview(host.view)
             window.bringSubviewToFront(host.view)
@@ -77,6 +81,7 @@ final class InlinePlayerHost: NSObject {
                 pass: pass,
                 startMs: startMs
             )
+            PlayerBridge.shared.markPlayerPresented()
 
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             self.orientationObserver = NotificationCenter.default.addObserver(

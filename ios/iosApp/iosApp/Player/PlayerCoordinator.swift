@@ -14,52 +14,56 @@ struct PlayRequest: Identifiable {
     let startMs: Int64
 }
 
-/// 播放器呈现协调器：用 UIKit modal 直接 present，避免 SwiftUI fullScreenCover
-/// 在 Compose UIViewController 承载下偶发不弹出的问题。
+/// 播放器呈现协调器：直接把 SwiftUI 播放页以全窗口 overlay 加到 key window。
+/// 不走 fullScreenCover / present，避免 Compose 承载层下 modal 不弹的问题。
 final class PlayerCoordinator: ObservableObject {
     static let shared = PlayerCoordinator()
 
     @Published var request: PlayRequest?
-    private var presented: UIViewController?
+    private var overlay: UIHostingController<VLCPlayerScreen>?
 
     private init() {}
 
     func present(_ request: PlayRequest) {
         DispatchQueue.main.async {
-            guard let root = Self.topViewController() else {
-                PlayerBridge.shared.log(message: "播放器：找不到顶层 UIViewController")
+            guard let window = Self.keyWindow() else {
+                PlayerBridge.shared.log(message: "播放器：找不到 key window")
                 return
             }
 
-            let host = UIHostingController(rootView: VLCPlayerScreen(request: request))
-            host.modalPresentationStyle = .fullScreen
-            host.view.backgroundColor = .black
-            root.present(host, animated: true)
+            self.overlay?.view.removeFromSuperview()
 
-            self.presented = host
+            let host = UIHostingController(
+                rootView: VLCPlayerScreen(
+                    request: request,
+                    onClose: { [weak self] in self?.dismiss() }
+                )
+            )
+            host.view.backgroundColor = .black
+            host.view.frame = window.bounds
+            host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            window.addSubview(host.view)
+            window.bringSubviewToFront(host.view)
+
+            self.overlay = host
             self.request = request
-            PlayerBridge.shared.log(message: "播放器：已 present \(request.title)")
+            PlayerBridge.shared.markPlayerPresented()
+            PlayerBridge.shared.log(message: "播放器：窗口 overlay 已加载 \(request.title)")
         }
     }
 
     func dismiss() {
         DispatchQueue.main.async {
-            self.presented?.dismiss(animated: true)
-            self.presented = nil
+            self.overlay?.view.removeFromSuperview()
+            self.overlay = nil
             self.request = nil
         }
     }
 
-    private static func topViewController() -> UIViewController? {
+    private static func keyWindow() -> UIWindow? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let windows = scenes.flatMap { $0.windows }
-        let window = windows.first(where: { $0.isKeyWindow }) ?? windows.first
-
-        var top = window?.rootViewController
-        while let presented = top?.presentedViewController {
-            top = presented
-        }
-        return top
+        return windows.first(where: { $0.isKeyWindow }) ?? windows.first
     }
 }
 

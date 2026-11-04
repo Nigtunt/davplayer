@@ -5,9 +5,9 @@ import ComposeApp
 /// 全屏播放页：视频渲染交给 VLCKit，控制层用 SwiftUI
 struct VLCPlayerScreen: View {
     let request: PlayRequest
+    let onClose: () -> Void
 
     @StateObject private var controller = VLCPlayerController()
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var showControls = true
@@ -98,7 +98,7 @@ struct VLCPlayerScreen: View {
         .onChange(of: scenePhase) { phase in
             // 退到后台直接退出播放器：隐私模式下不能让播放页盖住上锁的计算器
             if phase == .background {
-                dismiss()
+                onClose()
             }
         }
         .onChange(of: controller.isPlaying) { playing in
@@ -114,7 +114,7 @@ struct VLCPlayerScreen: View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
                 Button {
-                    dismiss()
+                    onClose()
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 20, weight: .semibold))
@@ -268,7 +268,7 @@ struct VLCPlayerScreen: View {
                 .buttonStyle(.borderedProminent)
 
                 Button("返回") {
-                    dismiss()
+                    onClose()
                 }
                 .buttonStyle(.bordered)
             }
