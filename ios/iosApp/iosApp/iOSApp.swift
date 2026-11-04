@@ -21,11 +21,15 @@ struct DavPlayerIosApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ComposeView()
-                .ignoresSafeArea(.keyboard)
-                .fullScreenCover(item: $player.request) { request in
-                    VLCPlayerScreen(request: request)
-                }
+            ZStack {
+                // 键盘弹出时 Compose 视图会收缩，露出的窗口底色默认是白的
+                Color.black.ignoresSafeArea()
+                ComposeView()
+                    .ignoresSafeArea(.keyboard)
+            }
+            .fullScreenCover(item: $player.request) { request in
+                VLCPlayerScreen(request: request)
+            }
         }
         .onChange(of: scenePhase) { phase in
             // 退到后台时让 Kotlin 侧重新上锁（隐私模式开启时才会锁）

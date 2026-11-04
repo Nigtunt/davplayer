@@ -60,14 +60,24 @@ class DavClient(baseUrl: String, private val user: String, private val pass: Str
                 """<D:displayname/><D:resourcetype/><D:getcontentlength/>""" +
                 """</D:prop></D:propfind>"""
 
-        val xml = http.request(url(path)) {
+        val response = http.request(url(path)) {
             method = HttpMethod("PROPFIND")
             header("Depth", "1")
             header(HttpHeaders.ContentType, "application/xml; charset=utf-8")
             authHeader?.let { header(HttpHeaders.Authorization, it) }
             setBody(body)
-        }.bodyAsText()
+        }
+        val status = response.status.value
+        val xml = response.bodyAsText()
 
+        if (status !in 200..299) {
+            throw IllegalStateException("WebDAV 请求失败：HTTP $status")
+        }
+        // 不是 multistatus 说明拿到的是登录页/网页/错误页，而不是目录列表，
+        // 直接报出来，避免“无报错但空列表”这种无法排查的状态
+        if (!xml.contains("multistatus", ignoreCase = true)) {
+            throw IllegalStateException("服务器返回的不是 WebDAV 目录（HTTP $status，${xml.length} 字节）")
+        }
         parseMultiStatus(xml, path)
     }
 
