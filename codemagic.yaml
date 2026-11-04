@@ -1,0 +1,72 @@
+workflows:
+  ios-unsigned:
+    name: DavPlayer iOS unsigned IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      java: 17
+      xcode: 16.4
+      cocoapods: default
+    cache:
+      cache_paths:
+        - ~/.gradle/caches
+        - ~/.konan
+    scripts:
+      - name: Build Kotlin framework
+        script: |
+          set -e
+          cd "$CM_BUILD_DIR"
+          chmod +x gradlew
+          ./gradlew -p ios :composeApp:linkReleaseFrameworkIosArm64 --no-daemon --stacktrace
+
+      - name: Stage framework
+        script: |
+          set -e
+          cd "$CM_BUILD_DIR"
+          mkdir -p ios/iosApp/Frameworks
+          rm -rf ios/iosApp/Frameworks/ComposeApp.framework
+          cp -R ios/composeApp/build/bin/iosArm64/releaseFramework/ComposeApp.framework ios/iosApp/Frameworks/
+
+      - name: Install xcodegen
+        script: |
+          set -e
+          brew install xcodegen || brew upgrade xcodegen
+
+      - name: Generate Xcode project
+        script: |
+          set -e
+          cd "$CM_BUILD_DIR/ios/iosApp"
+          xcodegen generate
+
+      - name: Install CocoaPods dependencies
+        script: |
+          set -e
+          cd "$CM_BUILD_DIR/ios/iosApp"
+          pod install --repo-update
+
+      - name: Build unsigned app
+        script: |
+          set -e
+          cd "$CM_BUILD_DIR/ios/iosApp"
+          xcodebuild -workspace DavPlayerIos.xcworkspace \
+            -scheme DavPlayerIos \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        script: |
+          set -e
+          cd "$CM_BUILD_DIR"
+          rm -rf out/Payload
+          mkdir -p out/Payload
+          cp -R ios/iosApp/build/Build/Products/Release-iphoneos/DavPlayer.app out/Payload/
+          cd out
+          rm -f DavPlayer-unsigned.ipa
+          zip -qry DavPlayer-unsigned.ipa Payload
+          ls -lh DavPlayer-unsigned.ipa
+
+    artifacts:
+      - out/DavPlayer-unsigned.ipa
