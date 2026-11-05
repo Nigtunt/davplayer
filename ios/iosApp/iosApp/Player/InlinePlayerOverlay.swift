@@ -44,6 +44,9 @@ final class InlinePlayerHost: NSObject {
                 controller: controller,
                 title: title,
                 subtitles: subtitles,
+                videoURL: url,
+                user: user,
+                pass: pass,
                 onToggleFullscreen: { [weak self] full in self?.setFullscreen(full) }
             )
             let host = InlineHostingController(rootView: root)
@@ -205,6 +208,9 @@ private struct InlinePlayerView: View {
     @ObservedObject var controller: VLCPlayerController
     let title: String
     let subtitles: [SubtitleOption]
+    let videoURL: String
+    let user: String
+    let pass: String
     let onToggleFullscreen: (Bool) -> Void
 
     @State private var fullscreen = false
@@ -216,6 +222,9 @@ private struct InlinePlayerView: View {
     @State private var longPressBaseRate: Double = 1
     @State private var seekPreview: Double?
     @State private var seekBase: Double = 0
+    @State private var showSubtitleBrowser = false
+    @State private var subtitleDirectory: SubtitleDirectory?
+    @State private var subtitleLoading = false
 
     private let rates: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0]
 
@@ -293,6 +302,31 @@ private struct InlinePlayerView: View {
             if let message = controller.errorMessage {
                 errorOverlay(message)
             }
+
+            if showSubtitleBrowser {
+                SubtitleBrowserView(
+                    directory: subtitleDirectory,
+                    loading: subtitleLoading,
+                    onClose: { showSubtitleBrowser = false },
+                    onUp: {
+                        if let parent = subtitleDirectory?.parent {
+                            loadSubtitleDirectory(parent)
+                        }
+                    },
+                    onOpen: { entry in
+                        if entry.isDir {
+                            loadSubtitleDirectory(entry.path)
+                        } else {
+                            controller.loadSubtitle(
+                                authenticatedURLString(entry.url, user: user, pass: pass)
+                            )
+                            showSubtitleBrowser = false
+                            scheduleHide()
+                        }
+                    }
+                )
+                .zIndex(10)
+            }
         }
         .background(Color.black)
         .onAppear { scheduleHide() }
@@ -315,9 +349,7 @@ private struct InlinePlayerView: View {
 
                 Spacer()
 
-                if !subtitles.isEmpty || controller.subtitleIndexes.count > 1 {
-                    subtitleMenu
-                }
+                subtitleMenu
                 rateMenu
 
                 Button {
@@ -430,6 +462,14 @@ private struct InlinePlayerView: View {
     private var subtitleMenu: some View {
         Menu {
             Button {
+                openSubtitleBrowser()
+            } label: {
+                Label("浏览字幕目录…", systemImage: "folder")
+            }
+
+            Divider()
+
+            Button {
                 controller.selectSubtitle(index: -1)
                 scheduleHide()
             } label: {
@@ -479,6 +519,20 @@ private struct InlinePlayerView: View {
                 .frame(width: 38, height: 30)
                 .background(Color.black.opacity(0.35))
                 .clipShape(Capsule())
+        }
+    }
+
+    private func openSubtitleBrowser() {
+        guard let url = URL(string: videoURL) else { return }
+        showSubtitleBrowser = true
+        loadSubtitleDirectory(parentDirectoryPath(of: url))
+    }
+
+    private func loadSubtitleDirectory(_ path: String) {
+        subtitleLoading = true
+        PlayerBridge.shared.listSubtitleDirectory(path: path) { directory in
+            subtitleLoading = false
+            subtitleDirectory = directory
         }
     }
 

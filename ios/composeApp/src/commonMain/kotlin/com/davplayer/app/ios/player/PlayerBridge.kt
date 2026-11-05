@@ -5,6 +5,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.davplayer.app.ios.data.AppLog
 import com.davplayer.app.ios.data.SourceStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * 播放器桥。
@@ -33,6 +37,20 @@ interface PlayerPresenter {
 data class SubtitleOption(
     val name: String,
     val url: String
+)
+
+/** 字幕目录浏览器的一项 */
+data class SubtitleEntry(
+    val name: String,
+    val path: String,
+    val url: String,
+    val isDir: Boolean
+)
+
+data class SubtitleDirectory(
+    val path: String,
+    val parent: String?,
+    val entries: List<SubtitleEntry>
 )
 
 /** 窗口坐标（point），由 Compose 的 boundsInWindow 换算后传给 Swift */
@@ -73,6 +91,35 @@ object PlayerBridge {
     /** 未注册（例如预览环境）时静默忽略 */
     var presenter: PlayerPresenter? = null
     var inlinePresenter: InlinePresenter? = null
+
+    /** BrowserScreen 注入：按需列 WebDAV 目录，供 Swift 字幕浏览器使用 */
+    var directoryLister: (suspend (String) -> List<SubtitleEntry>)? = null
+    private val directoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    fun listSubtitleDirectory(path: String, callback: (SubtitleDirectory) -> Unit) {
+        val lister = directoryLister
+        if (lister == null) {
+            callback(SubtitleDirectory(path = path, parent = parentDirectoryOf(path), entries = emptyList()))
+            return
+        }
+        directoryScope.launch {
+            val entries = runCatching { lister(path) }.getOrDefault(emptyList())
+            callback(
+                SubtitleDirectory(
+                    path = path,
+                    parent = parentDirectoryOf(path),
+                    entries = entries
+                )
+            )
+        }
+    }
+
+    private fun parentDirectoryOf(path: String): String? {
+        val trimmed = path.trimEnd('/')
+        if (trimmed.isEmpty()) return null
+        val parent = trimmed.substringBeforeLast('/', "")
+        return if (parent.isEmpty() || parent == "/") null else "$parent/"
+    }
 
     /** Swift 把播放器视图真正加到窗口后置 true；Kotlin 用它做 3 秒超时判断 */
     var playerPresented: Boolean by mutableStateOf(false)

@@ -35,7 +35,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +52,7 @@ import com.davplayer.app.ios.data.DavSource
 import com.davplayer.app.ios.data.SourceStore
 import com.davplayer.app.ios.data.isVideoFile
 import com.davplayer.app.ios.player.PlayerBridge
+import com.davplayer.app.ios.player.SubtitleEntry
 import com.davplayer.app.ios.player.SubtitleOption
 import com.davplayer.app.ios.theme.Bg
 import com.davplayer.app.ios.theme.Brand
@@ -78,6 +78,24 @@ fun BrowserScreen(
     onOpenSettings: () -> Unit
 ) {
     val client = remember(source) { DavClient(source.url, source.user, source.pass) }
+
+    // 字幕浏览器点击时才列目录，不在播放前预扫描
+    DisposableEffect(client) {
+        PlayerBridge.directoryLister = { dir ->
+            client.list(dir)
+                .mapNotNull { entry ->
+                    when {
+                        entry.isDir -> SubtitleEntry(entry.name, entry.href, "", true)
+                        entry.name.substringAfterLast('.', "").lowercase() in SubtitleExts ->
+                            SubtitleEntry(entry.name, entry.href, client.url(entry.href), false)
+                        else -> null
+                    }
+                }
+                .sortedWith(compareBy({ !it.isDir }, { it.name }))
+        }
+        onDispose { PlayerBridge.directoryLister = null }
+    }
+
     var stack by remember(source) {
         val restored = initialPath
             ?: SourceStore.lastPath(source.id)?.takeIf { it.startsWith(client.rootPath) }
@@ -97,7 +115,6 @@ fun BrowserScreen(
     var playPending by remember { mutableStateOf(false) }
     var autoPlayedHref by remember { mutableStateOf<String?>(null) }
     var reloadTick by remember { mutableStateOf(0) }
-    val scope = rememberCoroutineScope()
 
     LaunchedEffect(playPending) {
         if (playPending) {
@@ -169,11 +186,8 @@ fun BrowserScreen(
                 durationMs = saved?.durationMs ?: 0L,
                 coverPath = saved?.coverPath
             )
-            scope.launch {
-                val subtitles = loadSubtitleOptions(client, entry.href)
-                playingSubtitles = subtitles
-                playing = entry
-            }
+            playingSubtitles = emptyList()
+            playing = entry
         }
 
         // 从历史点进来时直接播放，使用 SourceStore 里的上次进度
@@ -624,36 +638,4 @@ private fun BottomHint(entry: DavEntry, onPlay: () -> Unit) {
     }
 }
 
-/**
- * 扫描视频目录及最多两层子目录里的 srt/ass/ssa/vtt。
- * OpenList 的字幕经常放在 Subs/ 子目录；这里先做有限递归，
- * 比只列同目录更接近 Android 的字幕选择器，同时避免扫整库。
- */
-private suspend fun loadSubtitleOptions(
-    client: DavClient,
-    videoPath: String
-): List<SubtitleOption> {
-    val parent = videoPath.trimEnd('/').substringBeforeLast('/', "")
-    val root = if (parent.isBlank()) "/" else "$parent/"
-    val result = mutableListOf<SubtitleOption>()
-    val queue = ArrayDeque<Pair<String, Int>>()
-    queue.add(root to 0)
-    var scannedDirs = 0
 
-    while (queue.isNotEmpty() && scannedDirs < 10 && result.size < 120) {
-        val (dir, depth) = queue.removeFirst()
-        scannedDirs++
-        val entries = runCatching { client.list(dir) }.getOrDefault(emptyList())
-        entries.forEach { entry ->
-            if (entry.isDir) {
-                if (depth < 2) {
-                    queue.add(entry.href to depth + 1)
-                }
-            } else if (entry.name.substringAfterLast('.', "").lowercase() in SubtitleExts) {
-                val relative = entry.href.removePrefix(root).trimStart('/')
-                result.add(SubtitleOption(name = relative, url = client.url(entry.href)))
-            }
-        }
-    }
-    return result
-}
