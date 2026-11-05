@@ -33,6 +33,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -100,7 +101,7 @@ fun BrowserScreen(
 
     LaunchedEffect(playPending) {
         if (playPending) {
-            kotlinx.coroutines.delay(3000)
+            kotlinx.coroutines.delay(6000)
             if (PlayerBridge.playerPresented) {
                 playPending = false
             } else {
@@ -151,17 +152,34 @@ fun BrowserScreen(
     BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
         val wide = maxWidth >= WideBreakpoint
 
+        // 播放器区域在横屏是右侧面板、竖屏是全内容区；
+        // 用 movableContentOf 让同一个 InlinePlayerHost 在旋转时移动而不被销毁。
+        val playerContent = remember {
+            movableContentOf<Modifier> { playerModifier ->
+                val entry = playing
+                if (entry != null) {
+                    InlinePlayerPane(
+                        entry = entry,
+                        url = client.url(entry.href),
+                        user = client.authUser,
+                        pass = client.authPass,
+                        sourceId = source.id,
+                        startMs = SourceStore.progressFor(source.id, entry.href)?.positionMs ?: 0L,
+                        subtitles = playingSubtitles,
+                        onClose = { playing = null },
+                        modifier = playerModifier
+                    )
+                }
+            }
+        }
+
         val startPlay: (DavEntry) -> Unit = play@ { entry ->
             AppLog.info(
                 "UI",
-                "点击视频：${entry.name} wide=$wide presenter=${PlayerBridge.presenter != null} inline=${PlayerBridge.inlinePresenter != null}"
+                "点击视频：${entry.name} wide=$wide inline=${PlayerBridge.inlinePresenter != null}"
             )
-            if (wide && PlayerBridge.inlinePresenter == null) {
+            if (PlayerBridge.inlinePresenter == null) {
                 playError = "内嵌播放器未注册（Swift 侧未初始化）"
-                return@play
-            }
-            if (!wide && PlayerBridge.presenter == null) {
-                playError = "全屏播放器未注册（Swift 侧未初始化）"
                 return@play
             }
             PlayerBridge.resetPlayerPresented()
@@ -179,23 +197,8 @@ fun BrowserScreen(
             )
             scope.launch {
                 val subtitles = loadSubtitleOptions(client, entry.href)
-                if (wide) {
-                    // 横屏：右侧内嵌播放
-                    playingSubtitles = subtitles
-                    playing = entry
-                } else {
-                    // 竖屏：和 Android 一样全屏播放
-                    PlayerBridge.present(
-                        url = client.url(entry.href),
-                        title = entry.name,
-                        user = client.authUser,
-                        pass = client.authPass,
-                        startMs = startMs,
-                        sourceId = source.id,
-                        path = entry.href,
-                        subtitles = subtitles
-                    )
-                }
+                playingSubtitles = subtitles
+                playing = entry
             }
         }
 
@@ -239,17 +242,7 @@ fun BrowserScreen(
                 }
                 Box(Modifier.width(1.dp).fillMaxHeight().background(Hairline))
                 if (playing != null) {
-                    InlinePlayerPane(
-                        entry = playing!!,
-                        url = client.url(playing!!.href),
-                        user = client.authUser,
-                        pass = client.authPass,
-                        sourceId = source.id,
-                        startMs = SourceStore.progressFor(source.id, playing!!.href)?.positionMs ?: 0L,
-                        subtitles = playingSubtitles,
-                        onClose = { playing = null },
-                        modifier = Modifier.weight(1f)
-                    )
+                    playerContent(Modifier.weight(1f))
                 } else {
                     DetailPane(
                         entry = selected,
@@ -259,31 +252,35 @@ fun BrowserScreen(
                 }
             }
         } else {
-            // 手机 / 窄窗口：单列
-            Column(Modifier.fillMaxSize()) {
-                PhoneTopBar(
-                    source = source,
-                    sources = SourceStore.sources,
-                    onSwitchSource = onSwitchSource,
-                    subtitle = path,
-                    canGoUp = stack.size > 1,
-                    onUp = onUp,
-                    onRefresh = onRetry,
-                    onExit = onExit,
-                    onOpenSettings = onOpenSettings
-                )
-                HorizontalDivider(color = Hairline, thickness = 1.dp)
-                DirectoryList(
-                    entries = entries,
-                    loading = loading,
-                    error = error,
-                    selectedHref = selected?.href,
-                    onRetry = onRetry,
-                    onOpen = openEntry,
-                    state = listState,
-                    modifier = Modifier.weight(1f)
-                )
-                selected?.let { BottomHint(it, onPlay = { startPlay(it) }) }
+            // 手机 / 窄窗口：播放时占满内容区；否则单列目录
+            if (playing != null) {
+                playerContent(Modifier.fillMaxSize())
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    PhoneTopBar(
+                        source = source,
+                        sources = SourceStore.sources,
+                        onSwitchSource = onSwitchSource,
+                        subtitle = path,
+                        canGoUp = stack.size > 1,
+                        onUp = onUp,
+                        onRefresh = onRetry,
+                        onExit = onExit,
+                        onOpenSettings = onOpenSettings
+                    )
+                    HorizontalDivider(color = Hairline, thickness = 1.dp)
+                    DirectoryList(
+                        entries = entries,
+                        loading = loading,
+                        error = error,
+                        selectedHref = selected?.href,
+                        onRetry = onRetry,
+                        onOpen = openEntry,
+                        state = listState,
+                        modifier = Modifier.weight(1f)
+                    )
+                    selected?.let { BottomHint(it, onPlay = { startPlay(it) }) }
+                }
             }
         }
     }

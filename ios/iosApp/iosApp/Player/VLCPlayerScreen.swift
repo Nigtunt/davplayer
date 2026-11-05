@@ -61,9 +61,9 @@ struct VLCPlayerScreen: View {
                 )
 
             if showControls {
+                // 不要把 tap 手势挂在整层控制栏上：点字幕 Menu 会先触发 toggleControls，
+                // 控制栏被移除后 Menu 也随之消失。空白区域由后面的透明手势层处理。
                 controlsOverlay
-                    .contentShape(Rectangle())
-                    .onTapGesture { toggleControls() }
                     .transition(.opacity)
             }
 

@@ -256,9 +256,8 @@ private struct InlinePlayerView: View {
                 )
 
             if showControls {
+                // 同全屏播放器：控制栏自身不能再挂 toggle 手势，否则字幕 Menu 会被连带关掉
                 controlsOverlay
-                    .contentShape(Rectangle())
-                    .onTapGesture { toggleControls() }
                     .transition(.opacity)
             }
 

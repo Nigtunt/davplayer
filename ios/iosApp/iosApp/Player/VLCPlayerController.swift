@@ -259,8 +259,9 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
         }
 
         if !coverAttempted && player.isPlaying && currentTime >= 2.5 {
+            // VLCKit 的 saveVideoSnapshotAt 在部分流/解码器上会抛 NSException，
+            // Swift 无法 catch，会直接 SIGABRT。先关闭自动截帧，封面用占位图。
             coverAttempted = true
-            generateCover()
         }
     }
 

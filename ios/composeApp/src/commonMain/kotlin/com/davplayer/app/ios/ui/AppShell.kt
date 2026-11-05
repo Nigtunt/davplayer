@@ -34,8 +34,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -96,45 +98,56 @@ fun AppShell() {
     BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
         val wide = maxWidth >= WideBreakpoint
 
+        // 横竖屏切换时 TabContent 会在两个布局分支间移动。
+        // 用 movableContentOf 保住内部状态（目录栈、Komga 阅读页、播放状态等），
+        // 否则 remember 会被销毁，阅读器和播放器就退出了。
+        val manageSources: () -> Unit = { tab = AppTab.Settings }
+        val openPrivacy: () -> Unit = { showPrivacy = true }
+        val resumeComic: (ComicProgress) -> Unit = {
+            komgaResume = it
+            tab = AppTab.Komga
+        }
+        val komgaConsumed: () -> Unit = { komgaResume = null }
+
+        val currentTab by rememberUpdatedState(tab)
+        val currentSource by rememberUpdatedState(activeSource)
+        val currentInitialPath by rememberUpdatedState(initialPath)
+        val currentHighlight by rememberUpdatedState(highlightHref)
+        val currentKomgaResume by rememberUpdatedState(komgaResume)
+        val currentOpenSource by rememberUpdatedState(openSource)
+        val currentManageSources by rememberUpdatedState(manageSources)
+        val currentOpenPrivacy by rememberUpdatedState(openPrivacy)
+        val currentResumeComic by rememberUpdatedState(resumeComic)
+        val currentKomgaConsumed by rememberUpdatedState(komgaConsumed)
+
+        val content = remember {
+            movableContentOf {
+                TabContent(
+                    tab = currentTab,
+                    source = currentSource,
+                    initialPath = currentInitialPath,
+                    highlightHref = currentHighlight,
+                    komgaResume = currentKomgaResume,
+                    onOpenSource = currentOpenSource,
+                    onManageSources = currentManageSources,
+                    onOpenPrivacy = currentOpenPrivacy,
+                    onResumeComic = currentResumeComic,
+                    onKomgaConsumed = currentKomgaConsumed
+                )
+            }
+        }
+
         if (wide) {
             Row(Modifier.fillMaxSize()) {
                 TabRail(tab) { tab = it }
                 Box(Modifier.weight(1f).fillMaxHeight()) {
-                    TabContent(
-                        tab = tab,
-                        source = activeSource,
-                        initialPath = initialPath,
-                        highlightHref = highlightHref,
-                        komgaResume = komgaResume,
-                        onOpenSource = openSource,
-                        onManageSources = { tab = AppTab.Settings },
-                        onOpenPrivacy = { showPrivacy = true },
-                        onResumeComic = {
-                            komgaResume = it
-                            tab = AppTab.Komga
-                        },
-                        onKomgaConsumed = { komgaResume = null }
-                    )
+                    content()
                 }
             }
         } else {
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f)) {
-                    TabContent(
-                        tab = tab,
-                        source = activeSource,
-                        initialPath = initialPath,
-                        highlightHref = highlightHref,
-                        komgaResume = komgaResume,
-                        onOpenSource = openSource,
-                        onManageSources = { tab = AppTab.Settings },
-                        onOpenPrivacy = { showPrivacy = true },
-                        onResumeComic = {
-                            komgaResume = it
-                            tab = AppTab.Komga
-                        },
-                        onKomgaConsumed = { komgaResume = null }
-                    )
+                    content()
                 }
                 BottomTabs(tab) { tab = it }
             }
