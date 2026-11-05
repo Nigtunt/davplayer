@@ -16,6 +16,8 @@ struct VLCPlayerScreen: View {
     @State private var hideWorkItem: DispatchWorkItem?
     @State private var longPressActive = false
     @State private var longPressBaseRate: Double = 1
+    @State private var seekPreview: Double?
+    @State private var seekBase: Double = 0
 
     private let rates: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0]
 
@@ -54,11 +56,38 @@ struct VLCPlayerScreen: View {
                     perform: {}
                 )
                 .simultaneousGesture(
-                    DragGesture(minimumDistance: 20).onEnded { value in
-                        let delta = Double(value.translation.width / 300.0) * 120.0
-                        controller.seek(to: controller.currentTime + delta)
-                    }
+                    DragGesture(minimumDistance: 20)
+                        .onChanged { value in
+                            guard controller.duration > 0 else { return }
+                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            if seekPreview == nil {
+                                seekBase = controller.currentTime
+                            }
+                            let delta = Double(value.translation.width / 300.0) * 120.0
+                            seekPreview = max(0.0, min(controller.duration, seekBase + delta))
+                        }
+                        .onEnded { _ in
+                            if let target = seekPreview {
+                                controller.seek(to: target)
+                                seekPreview = nil
+                                scheduleHide()
+                            }
+                        }
                 )
+
+            if let target = seekPreview {
+                VStack(spacing: 6) {
+                    Text(target >= seekBase ? "快进" : "快退")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("\(formatTime(seekBase))  →  \(formatTime(target))")
+                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(Color.black.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
 
             if showControls {
                 // 不要把 tap 手势挂在整层控制栏上：点字幕 Menu 会先触发 toggleControls，

@@ -33,7 +33,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -96,6 +95,7 @@ fun BrowserScreen(
     var playingSubtitles by remember { mutableStateOf<List<SubtitleOption>>(emptyList()) }
     var playError by remember { mutableStateOf<String?>(null) }
     var playPending by remember { mutableStateOf(false) }
+    var autoPlayedHref by remember { mutableStateOf<String?>(null) }
     var reloadTick by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
 
@@ -134,12 +134,7 @@ fun BrowserScreen(
         loading = false
     }
 
-    // 从“继续观看”进入时，自动选中上次播放的文件
-    LaunchedEffect(entries, highlightHref) {
-        if (highlightHref != null && selected == null) {
-            selected = entries?.firstOrNull { it.href == highlightHref }
-        }
-    }
+
 
     val onUp: () -> Unit = {
         if (stack.size > 1) {
@@ -152,32 +147,7 @@ fun BrowserScreen(
     BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
         val wide = maxWidth >= WideBreakpoint
 
-        // 播放器区域在横屏是右侧面板、竖屏是全内容区；
-        // 用 movableContentOf 让同一个 InlinePlayerHost 在旋转时移动而不被销毁。
-        val playerContent = remember {
-            movableContentOf<Modifier> { playerModifier ->
-                val entry = playing
-                if (entry != null) {
-                    InlinePlayerPane(
-                        entry = entry,
-                        url = client.url(entry.href),
-                        user = client.authUser,
-                        pass = client.authPass,
-                        sourceId = source.id,
-                        startMs = SourceStore.progressFor(source.id, entry.href)?.positionMs ?: 0L,
-                        subtitles = playingSubtitles,
-                        onClose = { playing = null },
-                        modifier = playerModifier
-                    )
-                }
-            }
-        }
-
         val startPlay: (DavEntry) -> Unit = play@ { entry ->
-            AppLog.info(
-                "UI",
-                "点击视频：${entry.name} wide=$wide inline=${PlayerBridge.inlinePresenter != null}"
-            )
             if (PlayerBridge.inlinePresenter == null) {
                 playError = "内嵌播放器未注册（Swift 侧未初始化）"
                 return@play
@@ -186,6 +156,10 @@ fun BrowserScreen(
             playPending = true
             val saved = SourceStore.progressFor(source.id, entry.href)
             val startMs = saved?.positionMs ?: 0L
+            AppLog.info(
+                "UI",
+                "点击视频：${entry.name} wide=$wide startMs=${startMs / 1000}s"
+            )
             // 保留上一次的进度和封面，播放器随后会持续回写
             SourceStore.record(
                 sourceId = source.id,
@@ -200,6 +174,17 @@ fun BrowserScreen(
                 playingSubtitles = subtitles
                 playing = entry
             }
+        }
+
+        // 从历史点进来时直接播放，使用 SourceStore 里的上次进度
+        LaunchedEffect(entries, highlightHref) {
+            val href = highlightHref ?: return@LaunchedEffect
+            if (autoPlayedHref == href) return@LaunchedEffect
+            val entry = entries?.firstOrNull { it.href == href } ?: return@LaunchedEffect
+            if (entry.isDir) return@LaunchedEffect
+            autoPlayedHref = href
+            selected = entry
+            startPlay(entry)
         }
 
         // 目录点击：文件夹进入；视频直接播放（和 Android 行为一致）
@@ -241,46 +226,60 @@ fun BrowserScreen(
                     )
                 }
                 Box(Modifier.width(1.dp).fillMaxHeight().background(Hairline))
-                if (playing != null) {
-                    playerContent(Modifier.weight(1f))
-                } else {
-                    DetailPane(
-                        entry = selected,
-                        onPlay = { selected?.let(startPlay) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                DetailPane(
+                    entry = selected,
+                    onPlay = { selected?.let(startPlay) },
+                    modifier = Modifier.weight(1f)
+                )
             }
         } else {
-            // 手机 / 窄窗口：播放时占满内容区；否则单列目录
-            if (playing != null) {
-                playerContent(Modifier.fillMaxSize())
-            } else {
-                Column(Modifier.fillMaxSize()) {
-                    PhoneTopBar(
-                        source = source,
-                        sources = SourceStore.sources,
-                        onSwitchSource = onSwitchSource,
-                        subtitle = path,
-                        canGoUp = stack.size > 1,
-                        onUp = onUp,
-                        onRefresh = onRetry,
-                        onExit = onExit,
-                        onOpenSettings = onOpenSettings
-                    )
-                    HorizontalDivider(color = Hairline, thickness = 1.dp)
-                    DirectoryList(
-                        entries = entries,
-                        loading = loading,
-                        error = error,
-                        selectedHref = selected?.href,
-                        onRetry = onRetry,
-                        onOpen = openEntry,
-                        state = listState,
-                        modifier = Modifier.weight(1f)
-                    )
-                    selected?.let { BottomHint(it, onPlay = { startPlay(it) }) }
-                }
+            // 手机 / 窄窗口：单列目录，播放器以 overlay 盖在上面
+            Column(Modifier.fillMaxSize()) {
+                PhoneTopBar(
+                    source = source,
+                    sources = SourceStore.sources,
+                    onSwitchSource = onSwitchSource,
+                    subtitle = path,
+                    canGoUp = stack.size > 1,
+                    onUp = onUp,
+                    onRefresh = onRetry,
+                    onExit = onExit,
+                    onOpenSettings = onOpenSettings
+                )
+                HorizontalDivider(color = Hairline, thickness = 1.dp)
+                DirectoryList(
+                    entries = entries,
+                    loading = loading,
+                    error = error,
+                    selectedHref = selected?.href,
+                    onRetry = onRetry,
+                    onOpen = openEntry,
+                    state = listState,
+                    modifier = Modifier.weight(1f)
+                )
+                selected?.let { BottomHint(it, onPlay = { startPlay(it) }) }
+            }
+        }
+
+        // 播放器只在这一处 compose：横屏覆盖右侧内容区，竖屏覆盖整个内容区。
+        // 旋转时只改 padding，InlinePlayerHost 不会被销毁，VLC 继续播放。
+        playing?.let { entry ->
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(start = if (wide) 381.dp else 0.dp)
+            ) {
+                InlinePlayerPane(
+                    entry = entry,
+                    url = client.url(entry.href),
+                    user = client.authUser,
+                    pass = client.authPass,
+                    sourceId = source.id,
+                    startMs = SourceStore.progressFor(source.id, entry.href)?.positionMs ?: 0L,
+                    subtitles = playingSubtitles,
+                    onClose = { playing = null },
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
     }
@@ -625,17 +624,36 @@ private fun BottomHint(entry: DavEntry, onPlay: () -> Unit) {
     }
 }
 
-/** 和 Android 一样：默认列出视频同目录的 srt/ass/ssa/vtt */
+/**
+ * 扫描视频目录及最多两层子目录里的 srt/ass/ssa/vtt。
+ * OpenList 的字幕经常放在 Subs/ 子目录；这里先做有限递归，
+ * 比只列同目录更接近 Android 的字幕选择器，同时避免扫整库。
+ */
 private suspend fun loadSubtitleOptions(
     client: DavClient,
     videoPath: String
 ): List<SubtitleOption> {
     val parent = videoPath.trimEnd('/').substringBeforeLast('/', "")
-    val dir = if (parent.isBlank()) "/" else "$parent/"
-    return runCatching { client.list(dir) }
-        .getOrDefault(emptyList())
-        .filter { entry ->
-            !entry.isDir && entry.name.substringAfterLast('.', "").lowercase() in SubtitleExts
+    val root = if (parent.isBlank()) "/" else "$parent/"
+    val result = mutableListOf<SubtitleOption>()
+    val queue = ArrayDeque<Pair<String, Int>>()
+    queue.add(root to 0)
+    var scannedDirs = 0
+
+    while (queue.isNotEmpty() && scannedDirs < 10 && result.size < 120) {
+        val (dir, depth) = queue.removeFirst()
+        scannedDirs++
+        val entries = runCatching { client.list(dir) }.getOrDefault(emptyList())
+        entries.forEach { entry ->
+            if (entry.isDir) {
+                if (depth < 2) {
+                    queue.add(entry.href to depth + 1)
+                }
+            } else if (entry.name.substringAfterLast('.', "").lowercase() in SubtitleExts) {
+                val relative = entry.href.removePrefix(root).trimStart('/')
+                result.add(SubtitleOption(name = relative, url = client.url(entry.href)))
+            }
         }
-        .map { SubtitleOption(name = it.name, url = client.url(it.href)) }
+    }
+    return result
 }

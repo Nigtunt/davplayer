@@ -252,6 +252,14 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
             duration = Double(length) / 1000
         }
 
+        // 有些流不会走到 state=.playing 的 delegate，补一次时间回调里的续播 seek
+        if pendingSeekMs > 0 && player.isPlaying {
+            let target = Double(pendingSeekMs) / 1000.0
+            pendingSeekMs = 0
+            player.time = VLCTime(int: Int32(target * 1000))
+            PlayerBridge.shared.log(message: "续播：seek \(Int(target))s")
+        }
+
         let now = Date().timeIntervalSince1970
         if player.isPlaying && now - lastReportAt >= 5 {
             lastReportAt = now
