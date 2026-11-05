@@ -103,7 +103,10 @@ object PlayerBridge {
             return
         }
         directoryScope.launch {
-            val entries = runCatching { lister(path) }.getOrDefault(emptyList())
+            val entries = runCatching { lister(path) }
+                .onFailure { AppLog.warn("Subtitle", "列目录失败：$path") }
+                .getOrDefault(emptyList())
+            AppLog.info("Subtitle", "列目录 $path -> ${entries.size} 项")
             callback(
                 SubtitleDirectory(
                     path = path,

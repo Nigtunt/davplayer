@@ -75,7 +75,8 @@ fun BrowserScreen(
     highlightHref: String? = null,
     onSwitchSource: (DavSource) -> Unit,
     onExit: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onHistoryConsumed: () -> Unit = {}
 ) {
     val client = remember(source) { DavClient(source.url, source.user, source.pass) }
 
@@ -199,6 +200,8 @@ fun BrowserScreen(
             autoPlayedHref = href
             selected = entry
             startPlay(entry)
+            // 消费掉这次历史请求，避免切 tab / BrowserScreen 重建后再次自动播放
+            onHistoryConsumed()
         }
 
         // 目录点击：文件夹进入；视频直接播放（和 Android 行为一致）
@@ -583,7 +586,7 @@ private fun InlinePlayerPane(
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier.fillMaxHeight()) {
+    Column(modifier.fillMaxHeight().background(Bg)) {
         Row(
             Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically

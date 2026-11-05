@@ -120,7 +120,11 @@ fun AppShell() {
                     komgaResume = it
                     tab = AppTab.Komga
                 },
-                onKomgaConsumed = { komgaResume = null }
+                onKomgaConsumed = { komgaResume = null },
+                onHistoryConsumed = {
+                    highlightHref = null
+                    initialPath = null
+                }
             )
         }
 
@@ -149,7 +153,8 @@ private fun TabContent(
     onManageSources: () -> Unit,
     onOpenPrivacy: () -> Unit,
     onResumeComic: (ComicProgress) -> Unit,
-    onKomgaConsumed: () -> Unit
+    onKomgaConsumed: () -> Unit,
+    onHistoryConsumed: () -> Unit
 ) {
     when (tab) {
         AppTab.Browse -> {
@@ -162,7 +167,8 @@ private fun TabContent(
                     highlightHref = highlightHref,
                     onSwitchSource = { onOpenSource(it, null, null) },
                     onExit = onManageSources,
-                    onOpenSettings = onOpenPrivacy
+                    onOpenSettings = onOpenPrivacy,
+                    onHistoryConsumed = onHistoryConsumed
                 )
             }
         }

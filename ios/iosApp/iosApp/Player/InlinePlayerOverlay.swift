@@ -63,6 +63,7 @@ final class InlinePlayerHost: NSObject {
                 return
             }
             host.view.frame = rect
+            host.view.autoresizingMask = []
             window.addSubview(host.view)
             window.bringSubviewToFront(host.view)
 
@@ -111,6 +112,9 @@ final class InlinePlayerHost: NSObject {
             self.inlineFrame = rect
             if !self.isFullscreen {
                 self.hosting?.view.frame = rect
+            } else {
+                // 全屏时也要记录最新的内嵌位置，退出全屏才能回到正确位置
+                PlayerBridge.shared.log(message: "全屏中更新内嵌 frame=\(rect)")
             }
         }
     }
@@ -146,6 +150,9 @@ final class InlinePlayerHost: NSObject {
         isFullscreen = full
         window.bringSubviewToFront(host.view)
         let target = full ? window.bounds : inlineFrame
+        // 全屏时让 UIKit 跟随窗口旋转自动改 frame；回内嵌后恢复由 Compose 驱动
+        host.view.autoresizingMask = full ? [.flexibleWidth, .flexibleHeight] : []
+        PlayerBridge.shared.log(message: "内嵌全屏=\(full) frame=\(target)")
         UIView.animate(withDuration: 0.25) {
             host.view.frame = target
         }
@@ -154,6 +161,12 @@ final class InlinePlayerHost: NSObject {
     private func handleOrientationChange() {
         guard isFullscreen, let host = hosting, let window = keyWindow else { return }
         host.view.frame = window.bounds
+        // 旋转完成前 window.bounds 可能还是旧值，补一次
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, self.isFullscreen,
+                  let host = self.hosting, let window = self.keyWindow else { return }
+            host.view.frame = window.bounds
+        }
     }
 }
 
