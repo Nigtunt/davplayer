@@ -61,15 +61,6 @@ private fun OnResume(action: () -> Unit) {
     }
 }
 
-/** 用本地漫画历史单独刷新书籍进度（不发网络请求） */
-private fun patchBooksFromLocal(list: List<KomgaBook>?, store: ComicHistoryStore): List<KomgaBook>? =
-    list?.map { b ->
-        val h = store.get(b.id)
-        if (h != null && h.page != b.readPage) {
-            b.copy(readPage = h.page, readCompleted = h.page >= h.pagesCount)
-        } else b
-    }
-
 /** 书架首页数据：提升到路由层保存，返回首页不重取 */
 class KomgaHomeState {
     var libraries by mutableStateOf<List<KomgaLibrary>?>(null)
@@ -193,7 +184,6 @@ private fun KomgaTopBar(
 @Composable
 private fun KomgaHome(client: KomgaClient, state: KomgaHomeState, onNavigate: (KomgaRoute) -> Unit) {
     val ctx = LocalContext.current
-    val comicStore = remember { ComicHistoryStore(ctx) }
     var error by remember { mutableStateOf<String?>(null) }
     var showCreateList by remember { mutableStateOf(false) }
     var listActionMsg by remember { mutableStateOf<String?>(null) }
@@ -213,9 +203,13 @@ private fun KomgaHome(client: KomgaClient, state: KomgaHomeState, onNavigate: (K
         }
     }
 
-    // 从阅读器返回：只用本地记录单独更新「继续阅读」的进度
+    // 从阅读器返回：重新读取服务端「继续阅读」，不再用本地记录覆盖
     OnResume {
-        if (state.loaded) state.onDeck = patchBooksFromLocal(state.onDeck, comicStore)
+        if (state.loaded) {
+            scope.launch {
+                runCatching { state.onDeck = client.onDeck() }
+            }
+        }
     }
 
     if (error != null) {
@@ -671,22 +665,23 @@ private fun SeriesGridCard(
 private fun KomgaSeriesDetail(client: KomgaClient, seriesId: String) {
     val ctx = LocalContext.current
     val imageLoader = LocalImageLoader.current
-    val comicStore = remember { ComicHistoryStore(ctx) }
     var books by remember { mutableStateOf<List<KomgaBook>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var addToListBook by remember { mutableStateOf<KomgaBook?>(null) }
     var listMsg by remember { mutableStateOf<String?>(null) }
+    var refreshTick by remember { mutableStateOf(0) }
 
-    LaunchedEffect(seriesId) {
+    LaunchedEffect(seriesId, refreshTick) {
+        error = null
         try {
-            books = patchBooksFromLocal(client.seriesBooks(seriesId), comicStore)
+            books = client.seriesBooks(seriesId)
         } catch (e: Exception) {
             error = e.message
         }
     }
 
-    // 从阅读器返回：只用本地记录单独更新刚读那本的进度，不重取列表
-    OnResume { books = patchBooksFromLocal(books, comicStore) }
+    // 从阅读器返回：重新读取服务端进度
+    OnResume { if (books != null) refreshTick++ }
 
     // 进入详情后，后台强制联网刷新一次封面并更新加密缓存（列表页仍用缓存展示）
     LaunchedEffect(books?.size) {
@@ -828,8 +823,6 @@ private fun KomgaReadListDetail(
     title: String,
     onDeleted: () -> Unit
 ) {
-    val ctx = LocalContext.current
-    val comicStore = remember { ComicHistoryStore(ctx) }
     var books by remember { mutableStateOf<List<KomgaBook>?>(null) }
     var bookIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -842,14 +835,14 @@ private fun KomgaReadListDetail(
         error = null
         try {
             bookIds = client.readLists().firstOrNull { it.id == readListId }?.bookIds ?: emptyList()
-            books = patchBooksFromLocal(client.readListBooks(readListId), comicStore)
+            books = client.readListBooks(readListId)
         } catch (e: Exception) {
             error = e.message
         }
     }
 
-    // 从阅读器返回：只用本地记录单独更新进度
-    OnResume { books = patchBooksFromLocal(books, comicStore) }
+    // 从阅读器返回：重新读取服务端进度
+    OnResume { if (books != null) refreshTick++ }
 
     Column(Modifier.fillMaxSize()) {
         Row(

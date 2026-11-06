@@ -694,7 +694,6 @@ fun buildPathChain(root: String, target: String?): List<String> {
 fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
     val ctx = LocalContext.current
     val store = remember { HistoryStore(ctx) }
-    val comicStore = remember { ComicHistoryStore(ctx) }
     val settings = remember { Settings(ctx) }
     val extra = davExtra()
 
@@ -710,7 +709,6 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
     }
 
     val items = remember(resumeTick) { store.list() }
-    val comics = remember(resumeTick) { comicStore.list() }
     val fmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
 
     // 漫画封面：加密缓存 + 认证（AES-GCM + Android KeyStore）
@@ -719,6 +717,24 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
         else KomgaClient(settings.komgaUrl, settings.komgaUser, settings.komgaPass)
     }
     val komgaLoader = remember { komgaClient?.let { buildKomgaImageLoader(ctx, it) } }
+    val scope = rememberCoroutineScope()
+
+    // 漫画历史完全来自 Komga 服务端，不再读取本地漫画进度
+    var comics by remember(komgaClient) { mutableStateOf<List<KomgaBook>?>(null) }
+    var comicError by remember(komgaClient) { mutableStateOf<String?>(null) }
+    var comicReload by remember(komgaClient) { mutableStateOf(0) }
+
+    LaunchedEffect(seg, resumeTick, comicReload, komgaClient) {
+        if (seg == 1 && komgaClient != null) {
+            comics = null
+            comicError = null
+            try {
+                comics = komgaClient.readBooks()
+            } catch (e: Exception) {
+                comicError = e.message ?: "加载失败"
+            }
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         // 胶囊筛选
@@ -843,87 +859,103 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
                 }
             }
         } else {
-            // ---------- 漫画历史 ----------
-            if (comics.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // ---------- 漫画历史：服务端 Komga 进度 ----------
+            when {
+                komgaClient == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("请先在「我的」里配置 Komga 服务器", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                comicError != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("漫画历史加载失败：$comicError", color = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.height(12.dp))
+                        Button(onClick = { comicReload++ }) { Text("重试") }
+                    }
+                }
+                comics == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+                comics!!.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("暂无漫画阅读历史", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            } else {
-                val listContent: @Composable () -> Unit = {
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        items(comics, key = { it.bookId }) { item ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        startReader(ctx, item.bookId, item.title, item.page, item.seriesTitle)
-                                    }
-                                    .padding(horizontal = 16.dp, vertical = 10.dp)
-                            ) {
-                                Box(
+                else -> {
+                    val client = komgaClient!!
+                    val listContent: @Composable () -> Unit = {
+                        LazyColumn(Modifier.fillMaxSize()) {
+                            items(comics!!, key = { it.id }) { item ->
+                                val time = item.progressTimestamp.take(16).replace('T', ' ')
+                                Row(
                                     Modifier
-                                        .size(62.dp, 90.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(DavTheme.ThumbPlaceholder)
-                                        .border(1.dp, extra.hairline, RoundedCornerShape(8.dp)),
-                                    contentAlignment = Alignment.Center
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            startReader(ctx, item.id, item.title, item.readPage, item.seriesTitle)
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 10.dp)
                                 ) {
-                                    if (komgaLoader != null && komgaClient != null) {
+                                    Box(
+                                        Modifier
+                                            .size(62.dp, 90.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(DavTheme.ThumbPlaceholder)
+                                            .border(1.dp, extra.hairline, RoundedCornerShape(8.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
                                         AsyncImage(
-                                            model = SecureImage(komgaClient.bookThumbUrl(item.bookId)),
+                                            model = SecureImage(client.bookThumbUrl(item.id)),
                                             contentDescription = item.title,
                                             contentScale = ContentScale.Crop,
                                             modifier = Modifier.fillMaxSize()
                                         )
-                                    } else {
-                                        Icon(Icons.Default.MenuBook, null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                            modifier = Modifier.size(24.dp))
-                                    }
-                                    // 底部进度
-                                    Box(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .height(3.dp)
-                                            .align(Alignment.BottomCenter)
-                                            .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.25f))
-                                    ) {
+                                        // 底部进度
                                         Box(
                                             Modifier
-                                                .fillMaxWidth(item.progress)
-                                                .fillMaxHeight()
-                                                .background(DavTheme.BrandGradient)
-                                        )
+                                                .fillMaxWidth()
+                                                .height(3.dp)
+                                                .align(Alignment.BottomCenter)
+                                                .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.25f))
+                                        ) {
+                                            Box(
+                                                Modifier
+                                                    .fillMaxWidth(item.progress)
+                                                    .fillMaxHeight()
+                                                    .background(DavTheme.BrandGradient)
+                                            )
+                                        }
                                     }
-                                }
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    ExpandableName(item.title)
-                                    if (item.seriesTitle.isNotBlank()) {
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        ExpandableName(item.title)
+                                        if (item.seriesTitle.isNotBlank()) {
+                                            Text(
+                                                item.seriesTitle, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Spacer(Modifier.height(4.dp))
                                         Text(
-                                            item.seriesTitle, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            if (time.isBlank()) "服务端进度：第 ${item.readPage} / ${item.pagesCount} 页"
+                                            else "第 ${item.readPage} / ${item.pagesCount} 页 · $time",
+                                            fontSize = 11.sp,
+                                            color = extra.textMuted
                                         )
                                     }
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        "读到第 ${item.page} / ${item.pagesCount} 页 · ${fmt.format(Date(item.updatedAt))}",
-                                        fontSize = 11.sp,
-                                        color = extra.textMuted
-                                    )
-                                }
-                                IconButton(onClick = { comicStore.remove(item.bookId); resumeTick++ }) {
-                                    Icon(Icons.Default.Delete, "删除记录", tint = extra.textMuted, modifier = Modifier.size(20.dp))
+                                    IconButton(onClick = {
+                                        scope.launch {
+                                            runCatching { client.deleteReadProgress(item.id) }
+                                            comicReload++
+                                        }
+                                    }) {
+                                        Icon(Icons.Default.Delete, "标记为未读", tint = extra.textMuted, modifier = Modifier.size(20.dp))
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                if (komgaLoader != null) {
-                    CompositionLocalProvider(LocalImageLoader provides komgaLoader) { listContent() }
-                } else {
-                    listContent()
+                    if (komgaLoader != null) {
+                        CompositionLocalProvider(LocalImageLoader provides komgaLoader) { listContent() }
+                    } else {
+                        listContent()
+                    }
                 }
             }
         }

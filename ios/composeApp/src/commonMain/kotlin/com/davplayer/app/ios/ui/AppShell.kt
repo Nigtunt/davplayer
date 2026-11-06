@@ -29,10 +29,13 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,18 +49,16 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.davplayer.app.ios.data.ComicProgress
 import com.davplayer.app.ios.data.ComicStore
 import com.davplayer.app.ios.data.DavSource
 import com.davplayer.app.ios.data.KomgaBook
-import com.davplayer.app.ios.data.KomgaBookMedia
 import com.davplayer.app.ios.data.KomgaClient
 import com.davplayer.app.ios.data.KomgaImage
-import com.davplayer.app.ios.data.KomgaReadProgress
 import com.davplayer.app.ios.data.PlayProgress
 import com.davplayer.app.ios.data.SourceStore
 import com.davplayer.app.ios.theme.Bg
 import com.davplayer.app.ios.theme.Brand
+import com.davplayer.app.ios.theme.Danger
 import com.davplayer.app.ios.theme.Hairline
 import com.davplayer.app.ios.theme.Muted
 import com.davplayer.app.ios.theme.SurfaceBg
@@ -80,7 +81,7 @@ fun AppShell() {
     var activeSourceId by remember { mutableStateOf<String?>(SourceStore.sources.firstOrNull()?.id) }
     var initialPath by remember { mutableStateOf<String?>(null) }
     var highlightHref by remember { mutableStateOf<String?>(null) }
-    var komgaResume by remember { mutableStateOf<ComicProgress?>(null) }
+    var komgaResume by remember { mutableStateOf<KomgaBook?>(null) }
     var showPrivacy by remember { mutableStateOf(false) }
 
     val activeSource = SourceStore.sourceById(activeSourceId ?: "")
@@ -148,11 +149,11 @@ private fun TabContent(
     source: DavSource?,
     initialPath: String?,
     highlightHref: String?,
-    komgaResume: ComicProgress?,
+    komgaResume: KomgaBook?,
     onOpenSource: (DavSource, String?, String?) -> Unit,
     onManageSources: () -> Unit,
     onOpenPrivacy: () -> Unit,
-    onResumeComic: (ComicProgress) -> Unit,
+    onResumeComic: (KomgaBook) -> Unit,
     onKomgaConsumed: () -> Unit,
     onHistoryConsumed: () -> Unit
 ) {
@@ -175,7 +176,7 @@ private fun TabContent(
 
         AppTab.Komga -> KomgaTab(
             onOpenSettings = onManageSources,
-            initialBook = komgaResume?.toKomgaBook(),
+            initialBook = komgaResume,
             onConsumed = onKomgaConsumed
         )
 
@@ -326,10 +327,27 @@ private fun SettingsTab(onOpenSource: (DavSource) -> Unit, onOpenPrivacy: () -> 
 @Composable
 private fun HistoryTab(
     onResume: (PlayProgress) -> Unit,
-    onResumeComic: (ComicProgress) -> Unit
+    onResumeComic: (KomgaBook) -> Unit
 ) {
     val history = SourceStore.history
     var segment by remember { mutableStateOf(0) }
+    val config = ComicStore.config
+    val client = remember(config) {
+        if (config.isConfigured) KomgaClient(config.url, config.email, config.pass) else null
+    }
+    var comics by remember(client) { mutableStateOf<List<KomgaBook>?>(null) }
+    var comicError by remember(client) { mutableStateOf<String?>(null) }
+    var comicReload by remember(client) { mutableStateOf(0) }
+
+    LaunchedEffect(client, segment, comicReload) {
+        if (segment == 1 && client != null) {
+            comics = null
+            comicError = null
+            runCatching { client.readBooks() }
+                .onSuccess { comics = it }
+                .onFailure { comicError = it.message ?: "加载失败" }
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(Bg), contentAlignment = Alignment.TopCenter) {
         Column(
@@ -364,25 +382,23 @@ private fun HistoryTab(
                     }
                 }
             } else {
-                val comics = ComicStore.history
-                if (comics.isEmpty()) {
-                    Text("暂无漫画阅读历史", color = Muted, fontSize = 13.sp)
-                    Spacer(Modifier.height(6.dp))
-                    Text("在「漫画」里读一本后出现在这里", color = Muted, fontSize = 12.sp)
-                } else {
-                    val config = ComicStore.config
-                    val komga = remember(config) {
-                        if (config.isConfigured) {
-                            KomgaClient(config.url, config.email, config.pass)
-                        } else {
-                            null
-                        }
+                when {
+                    client == null -> Text("请先在「我的」里配置 Komga 服务器", color = Muted, fontSize = 13.sp)
+                    comicError != null -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("漫画历史加载失败：$comicError", color = Danger, fontSize = 13.sp)
+                        TextButton(onClick = { comicReload++ }) { Text("重试", color = Brand) }
                     }
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        comics.forEach { item ->
+                    comics == null -> CircularProgressIndicator(color = Brand)
+                    comics!!.isEmpty() -> {
+                        Text("暂无漫画阅读历史", color = Muted, fontSize = 13.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text("服务端没有进行中或已读的书籍", color = Muted, fontSize = 12.sp)
+                    }
+                    else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        comics!!.forEach { item ->
                             ComicHistoryRow(
                                 item = item,
-                                client = komga,
+                                client = client,
                                 onClick = { onResumeComic(item) }
                             )
                         }
@@ -411,7 +427,7 @@ private fun HistoryChip(text: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ComicHistoryRow(item: ComicProgress, client: KomgaClient?, onClick: () -> Unit) {
+private fun ComicHistoryRow(item: KomgaBook, client: KomgaClient?, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -425,7 +441,7 @@ private fun ComicHistoryRow(item: ComicProgress, client: KomgaClient?, onClick: 
         ) {
             if (client != null && !ComicStore.safeMode) {
                 KomgaImage(
-                    url = client.bookThumbUrl(item.bookId),
+                    url = client.bookThumbUrl(item.id),
                     auth = client.authHeader,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
@@ -454,14 +470,23 @@ private fun ComicHistoryRow(item: ComicProgress, client: KomgaClient?, onClick: 
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(4.dp))
-            Text("读到第 ${item.page} / ${item.pagesCount} 页", fontSize = 11.sp, color = Muted)
+            val time = item.progressTimestamp.take(16).replace('T', ' ')
+            Text(
+                if (time.isBlank()) "服务端进度：第 ${item.readPage} / ${item.pagesCount} 页"
+                else "第 ${item.readPage} / ${item.pagesCount} 页 · $time",
+                fontSize = 11.sp,
+                color = Muted
+            )
             Spacer(Modifier.height(6.dp))
+            val fraction = if (item.pagesCount > 0) {
+                (item.readPage.toFloat() / item.pagesCount).coerceIn(0f, 1f)
+            } else 0f
             Box(
                 Modifier.fillMaxWidth().height(3.dp).background(SurfaceHigh, RoundedCornerShape(2.dp))
             ) {
                 Box(
                     Modifier
-                        .fillMaxWidth(item.fraction.coerceIn(0f, 1f))
+                        .fillMaxWidth(fraction)
                         .height(3.dp)
                         .background(Brand, RoundedCornerShape(2.dp))
                 )
@@ -469,14 +494,6 @@ private fun ComicHistoryRow(item: ComicProgress, client: KomgaClient?, onClick: 
         }
     }
 }
-
-private fun ComicProgress.toKomgaBook(): KomgaBook = KomgaBook(
-    id = bookId,
-    seriesTitle = seriesTitle,
-    name = title,
-    media = KomgaBookMedia(pagesCount = pagesCount),
-    readProgress = KomgaReadProgress(page = page)
-)
 
 @Composable
 private fun EmptySources(onManageSources: () -> Unit) {

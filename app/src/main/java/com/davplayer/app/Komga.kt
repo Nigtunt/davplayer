@@ -37,9 +37,18 @@ data class KomgaBook(
     val pagesCount: Int,
     val readPage: Int,          // 0 = 未读（Komga 的 page 是 1-based）
     val readCompleted: Boolean,
-    val sizeBytes: Long
+    val sizeBytes: Long,
+    val readDate: String? = null,
+    val created: String? = null,
+    val lastModified: String? = null,
+    val deviceId: String? = null,
+    val deviceName: String? = null
 ) {
     val inProgress: Boolean get() = readPage > 0 && !readCompleted
+    val progress: Float
+        get() = if (pagesCount > 0) (readPage.toFloat() / pagesCount).coerceIn(0f, 1f) else 0f
+    val progressTimestamp: String
+        get() = lastModified ?: readDate ?: created ?: ""
 }
 
 data class KomgaPage(val number: Int, val width: Int, val height: Int, val mediaType: String)
@@ -70,6 +79,14 @@ class KomgaClient(baseUrl: String, email: String, pass: String) {
 
     private suspend fun getJson(path: String): String = withContext(Dispatchers.IO) {
         http.newCall(Request.Builder().url("$base$path").build()).execute().use { r ->
+            if (r.code !in 200..299) throw IOException("Komga 请求失败: HTTP ${r.code}")
+            r.body?.string() ?: ""
+        }
+    }
+
+    private suspend fun postJson(path: String, body: String): String = withContext(Dispatchers.IO) {
+        val requestBody = body.toRequestBody("application/json; charset=utf-8".toMediaType())
+        http.newCall(Request.Builder().url("$base$path").post(requestBody).build()).execute().use { r ->
             if (r.code !in 200..299) throw IOException("Komga 请求失败: HTTP ${r.code}")
             r.body?.string() ?: ""
         }
@@ -118,6 +135,35 @@ class KomgaClient(baseUrl: String, email: String, pass: String) {
                 height = o.optInt("height"),
                 mediaType = o.optString("mediaType")
             )
+        }
+    }
+
+    /** 服务端当前进度：GET /api/v1/books/{bookId} 的 BookDto.readProgress */
+    suspend fun book(bookId: String): KomgaBook =
+        parseBook(JSONObject(getJson("/api/v1/books/$bookId")))
+
+    /** 历史页：官方 POST /api/v1/books/list 过滤 IN_PROGRESS / READ */
+    suspend fun readBooks(size: Int = 200): List<KomgaBook> {
+        val body = JSONObject()
+            .put("condition", JSONObject().put("anyOf", JSONArray().apply {
+                put(JSONObject().put("readStatus", JSONObject().put("operator", "is").put("value", "IN_PROGRESS")))
+                put(JSONObject().put("readStatus", JSONObject().put("operator", "is").put("value", "READ")))
+            }))
+            .toString()
+
+        val items = try {
+            parseBookPage(postJson("/api/v1/books/list?unpaged=true&size=$size", body)).items
+        } catch (e: IOException) {
+            parseBookPage(getJson("/api/v1/books?read_status=IN_PROGRESS&read_status=READ&unpaged=true")).items
+        }
+        return items.sortedByDescending { it.progressTimestamp }
+    }
+
+    suspend fun deleteReadProgress(bookId: String) = withContext(Dispatchers.IO) {
+        http.newCall(
+            Request.Builder().url("$base/api/v1/books/$bookId/read-progress").delete().build()
+        ).execute().use { r ->
+            if (r.code !in 200..299 && r.code != 204) throw IOException("清除进度失败: HTTP ${r.code}")
         }
     }
 
@@ -246,7 +292,15 @@ class KomgaClient(baseUrl: String, email: String, pass: String) {
             pagesCount = media.optInt("pagesCount"),
             readPage = rp?.optInt("page", 0) ?: 0,
             readCompleted = rp?.optBoolean("completed", false) ?: false,
-            sizeBytes = o.optLong("sizeBytes")
+            sizeBytes = o.optLong("sizeBytes"),
+            readDate = rp?.optStringOrNull("readDate"),
+            created = rp?.optStringOrNull("created"),
+            lastModified = rp?.optStringOrNull("lastModified"),
+            deviceId = rp?.optStringOrNull("deviceId"),
+            deviceName = rp?.optStringOrNull("deviceName")
         )
     }
+
+    private fun JSONObject.optStringOrNull(key: String): String? =
+        optString(key).takeIf { it.isNotBlank() }
 }

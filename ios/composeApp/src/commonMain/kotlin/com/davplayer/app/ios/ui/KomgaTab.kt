@@ -48,6 +48,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -86,6 +87,9 @@ import com.davplayer.app.ios.theme.Hairline
 import com.davplayer.app.ios.theme.Muted
 import com.davplayer.app.ios.theme.SurfaceBg
 import com.davplayer.app.ios.theme.SurfaceHigh
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -982,6 +986,7 @@ private fun ReadListDetailScreen(
 
 @Composable
 private fun ReaderScreen(client: KomgaClient, book: KomgaBook, onBack: () -> Unit) {
+    var resolvedBook by remember(client, book.id) { mutableStateOf(book) }
     var pages by remember(client, book.id) { mutableStateOf<List<KomgaPage>>(emptyList()) }
     var loading by remember(client, book.id) { mutableStateOf(true) }
     var error by remember(client, book.id) { mutableStateOf<String?>(null) }
@@ -990,10 +995,12 @@ private fun ReaderScreen(client: KomgaClient, book: KomgaBook, onBack: () -> Uni
     LaunchedEffect(client, book.id, reload) {
         loading = true
         error = null
+        // 进度以服务端 GET /books/{id} 为准，列表里带过来的 book 只作为兜底
+        resolvedBook = runCatching { client.book(book.id) }.getOrDefault(book)
         runCatching { client.bookPages(book.id) }
             .onSuccess { list ->
-                pages = if (list.isEmpty() && book.pagesCount > 0) {
-                    (1..book.pagesCount).map { KomgaPage(number = it) }
+                pages = if (list.isEmpty() && resolvedBook.pagesCount > 0) {
+                    (1..resolvedBook.pagesCount).map { KomgaPage(number = it) }
                 } else list
             }
             .onFailure { error = it.message ?: "加载失败" }
@@ -1004,7 +1011,7 @@ private fun ReaderScreen(client: KomgaClient, book: KomgaBook, onBack: () -> Uni
         loading -> KomgaLoading()
         error != null -> KomgaError(error!!) { reload++ }
         pages.isEmpty() -> KomgaEmpty("这本没有可读页面")
-        else -> ReaderContent(client, book, pages, onBack)
+        else -> ReaderContent(client, resolvedBook, pages, onBack)
     }
 }
 
@@ -1022,6 +1029,18 @@ private fun ReaderContent(
     var zoomed by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
+    val syncScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
+    var initialized by remember { mutableStateOf(false) }
+    var lastWrittenPage by remember { mutableStateOf(book.readPage) }
+
+    fun saveProgress(page: Int) {
+        syncScope.launch {
+            runCatching {
+                client.markReadProgress(book.id, page, page >= pages.size)
+                lastWrittenPage = page
+            }
+        }
+    }
 
     LaunchedEffect(pagerState.currentPage, mode) {
         if (mode != 2) {
@@ -1032,11 +1051,26 @@ private fun ReaderContent(
         }
     }
 
+    // 打开阅读器不写服务端；只有真正翻页并停留后再同步
     LaunchedEffect(pagerState.currentPage) {
+        if (!initialized) {
+            initialized = true
+            return@LaunchedEffect
+        }
         val page = pagerState.currentPage + 1
-        ComicStore.record(book.id, book.seriesTitle, book.title, page, pages.size)
-        delay(900)
-        runCatching { client.markReadProgress(book.id, page, page >= pages.size) }
+        delay(1200)
+        saveProgress(page)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            val page = pagerState.currentPage + 1
+            if (initialized && page != lastWrittenPage) {
+                syncScope.launch {
+                    runCatching { client.markReadProgress(book.id, page, page >= pages.size) }
+                }
+            }
+        }
     }
 
     LaunchedEffect(mode) {

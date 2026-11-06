@@ -52,7 +52,15 @@ data class KomgaBookMeta(val title: String = "")
 data class KomgaBookMedia(@SerialName("pagesCount") val pagesCount: Int = 0)
 
 @Serializable
-data class KomgaReadProgress(val page: Int = 0, val completed: Boolean = false)
+data class KomgaReadProgress(
+    val page: Int = 0,
+    val completed: Boolean = false,
+    val readDate: String? = null,
+    val created: String? = null,
+    val lastModified: String? = null,
+    val deviceId: String? = null,
+    val deviceName: String? = null
+)
 
 @Serializable
 data class KomgaBook(
@@ -71,6 +79,11 @@ data class KomgaBook(
     val readPage: Int get() = readProgress?.page ?: 0
     val readCompleted: Boolean get() = readProgress?.completed ?: false
     val inProgress: Boolean get() = readPage > 0 && !readCompleted
+    val progressTimestamp: String
+        get() = readProgress?.lastModified
+            ?: readProgress?.readDate
+            ?: readProgress?.created
+            ?: ""
 }
 
 @Serializable
@@ -131,6 +144,20 @@ class KomgaClient(baseUrl: String, email: String, pass: String) {
         return response.bodyAsText()
     }
 
+    private suspend fun postJson(path: String, body: String): String {
+        val response = http.post("$base$path") {
+            header(HttpHeaders.Authorization, authHeader)
+            contentType(ContentType.Application.Json)
+            setBody(body)
+        }
+        val status = response.status.value
+        if (status !in 200..299) {
+            AppLog.error("Komga", "POST $path -> HTTP $status")
+            throw IllegalStateException("Komga 请求失败：HTTP $status")
+        }
+        return response.bodyAsText()
+    }
+
     suspend fun testConnection(): Boolean = runCatching { libraries() }.isSuccess
 
     suspend fun libraries(): List<KomgaLibrary> =
@@ -167,6 +194,47 @@ class KomgaClient(baseUrl: String, email: String, pass: String) {
             json.decodeFromString(text)
         } else {
             json.decodeFromString<KomgaPaged<KomgaPage>>(text).content
+        }
+    }
+
+    /** 服务端当前进度：GET /api/v1/books/{bookId} 的 BookDto.readProgress */
+    suspend fun book(bookId: String): KomgaBook =
+        json.decodeFromString(getJson("/api/v1/books/$bookId"))
+
+    /** 历史页：官方 POST /api/v1/books/list 过滤 IN_PROGRESS / READ */
+    suspend fun readBooks(size: Int = 200): List<KomgaBook> {
+        val body = buildJsonObject {
+            put("condition", buildJsonObject {
+                put("anyOf", buildJsonArray {
+                    listOf("IN_PROGRESS", "READ").forEach { status ->
+                        add(buildJsonObject {
+                            put("readStatus", buildJsonObject {
+                                put("operator", "is")
+                                put("value", status)
+                            })
+                        })
+                    }
+                })
+            })
+        }.toString()
+
+        val result = runCatching {
+            parseBookPage(postJson("/api/v1/books/list?unpaged=true&size=$size", body)).content
+        }.getOrElse {
+            AppLog.warn("Komga", "books/list 查询失败，回退到 books 列表接口")
+            parseBookPage(
+                getJson("/api/v1/books?read_status=IN_PROGRESS&read_status=READ&unpaged=true")
+            ).content
+        }
+        return result.sortedByDescending { it.progressTimestamp }
+    }
+
+    suspend fun deleteReadProgress(bookId: String) {
+        val response = http.delete("$base/api/v1/books/$bookId/read-progress") {
+            header(HttpHeaders.Authorization, authHeader)
+        }
+        if (response.status.value !in 200..299 && response.status.value != 204) {
+            throw IllegalStateException("清除进度失败：HTTP ${response.status.value}")
         }
     }
 

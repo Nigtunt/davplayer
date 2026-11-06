@@ -41,6 +41,9 @@ import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.compose.LocalImageLoader
 import coil.request.ImageRequest
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -113,10 +116,13 @@ fun ReaderScreen(
     onBack: () -> Unit
 ) {
     var pages by remember { mutableStateOf<List<KomgaPage>?>(null) }
+    var serverPage by remember(bookId) { mutableStateOf(startPage) }
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(bookId) {
         try {
+            // 打开阅读器时以服务端 GET /books/{id} 的进度为准
+            serverPage = runCatching { client.book(bookId).readPage }.getOrDefault(startPage)
             pages = client.bookPages(bookId)
         } catch (e: Exception) {
             error = e.message
@@ -144,7 +150,7 @@ fun ReaderScreen(
                 title = title,
                 seriesTitle = seriesTitle,
                 pages = pages!!,
-                startPage = startPage,
+                startPage = serverPage,
                 onBack = onBack
             )
         }
@@ -163,14 +169,16 @@ private fun ReaderContent(
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val historyStore = remember { ComicHistoryStore(ctx) }
     val imageLoader = remember(client) { buildKomgaImageLoader(ctx, client) }
+    val syncScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
 
     val pageCount = pages.size
     var mode by remember { mutableStateOf(ReadMode.LTR) }
     val controlsVisible = remember { mutableStateOf(false) }
     val currentPage = remember { mutableStateOf((startPage - 1).coerceIn(0, pageCount - 1)) } // 0-based
     var sliderDrag by remember { mutableStateOf<Float?>(null) }
+    var initialized by remember { mutableStateOf(false) }
+    var lastWrittenPage by remember { mutableStateOf(startPage) }
 
     val pagerState = rememberPagerState(initialPage = currentPage.value) { pageCount }
     val listState = rememberLazyListState()
@@ -196,32 +204,35 @@ private fun ReaderContent(
     val scrolling = if (mode == ReadMode.VERTICAL) listState.isScrollInProgress
     else pagerState.isScrollInProgress
 
-    // 进度同步：Komga 云端 + 本地漫画历史（停留 1.2s 后记录）
+    // 只同步 Komga 服务端；打开阅读器的初始页不写，避免旧本地状态覆盖服务端
     fun saveProgress(pageIndex: Int) {
         val page = pageIndex + 1
-        historyStore.upsert(
-            ComicHistoryItem(
-                bookId = bookId,
-                seriesTitle = seriesTitle,
-                title = title,
-                page = page,
-                pagesCount = pageCount,
-                updatedAt = System.currentTimeMillis()
-            )
-        )
-        scope.launch {
+        syncScope.launch {
             runCatching {
                 client.markReadProgress(bookId, page = page, completed = pageIndex >= pageCount - 1)
+                lastWrittenPage = page
             }
         }
     }
 
     LaunchedEffect(currentPage.value) {
+        if (!initialized) {
+            initialized = true
+            return@LaunchedEffect
+        }
         delay(1200)
         saveProgress(currentPage.value)
     }
+
     DisposableEffect(Unit) {
-        onDispose { saveProgress(currentPage.value) }
+        onDispose {
+            val page = currentPage.value + 1
+            if (initialized && page != lastWrittenPage) {
+                syncScope.launch {
+                    runCatching { client.markReadProgress(bookId, page, page >= pageCount) }
+                }
+            }
+        }
     }
 
     fun jumpTo(index: Int) {

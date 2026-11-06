@@ -1,11 +1,15 @@
 name: ios-ipa
 
-# iOS 技术验证包：只编译「未签名 ipa」，签名与安装交给 Windows 上的
-# AltStore / Sideloadly（免费 Apple ID，7 天续签）
+# iOS 技术验证包：只编译「未签名 ipa」，签名与安装交给 Windows 上的 iloader
 # 目标机 iPadOS 17.7.11 > 16.6.1，TrollStore 不可用
 on:
-  # 改用 Codemagic 构建；GitHub runner 仅保留手动触发作为备用
+  push:
+    branches: [ main ]
   workflow_dispatch:
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
