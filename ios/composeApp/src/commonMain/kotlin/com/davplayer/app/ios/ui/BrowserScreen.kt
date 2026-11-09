@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -61,6 +63,7 @@ import com.davplayer.app.ios.data.SourceStore
 import com.davplayer.app.ios.data.davParentPath
 import com.davplayer.app.ios.data.davTargetPath
 import com.davplayer.app.ios.data.isVideoFile
+import com.davplayer.app.ios.data.percentDecode
 import com.davplayer.app.ios.player.PlayerBridge
 import com.davplayer.app.ios.player.SubtitleEntry
 import com.davplayer.app.ios.player.SubtitleOption
@@ -573,20 +576,56 @@ private fun MoveDirectoryDialog(
     }
 
     val atRoot = path.trimEnd('/') == rootPath.trimEnd('/')
+    val pathStack = buildPathStack(rootPath, path)
+    val crumbs = pathStack.mapIndexed { index, item ->
+        if (index == 0) "根目录"
+        else percentDecode(item.trimEnd('/').substringAfterLast('/')).ifBlank { item }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("移动「${entry.name}」") },
+        title = { Text("移动文件") },
         text = {
             Column {
                 Text(
-                    "目标目录：$path",
-                    fontSize = 11.sp,
-                    color = Muted,
-                    maxLines = 2,
+                    entry.name,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    crumbs.forEachIndexed { index, label ->
+                        val targetPath = pathStack[index]
+                        Text(
+                            label,
+                            fontSize = 12.sp,
+                            color = if (index == crumbs.lastIndex) Brand else Muted,
+                            modifier = Modifier
+                                .clickable { path = targetPath }
+                                .padding(horizontal = 2.dp, vertical = 5.dp)
+                        )
+                        if (index < crumbs.lastIndex) {
+                            Text(
+                                ">",
+                                fontSize = 12.sp,
+                                color = Muted,
+                                modifier = Modifier.padding(horizontal = 2.dp)
+                            )
+                        }
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { path = davParentPath(path) }, enabled = !atRoot) {
+                    TextButton(
+                        onClick = {
+                            val parent = davParentPath(path)
+                            path = if (parent.startsWith(rootPath)) parent else rootPath
+                        },
+                        enabled = !atRoot
+                    ) {
                         Text("↑ 上级")
                     }
                     Spacer(Modifier.weight(1f))

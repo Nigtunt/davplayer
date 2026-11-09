@@ -15,10 +15,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -319,7 +321,11 @@ fun BrowseScreen(
             addAll(buildPathChain(client.rootPath, settings.lastPath))
         }
     }
-    val path = stack.last()
+    // 防御快速连点返回：即使状态列表短暂为空也不要 last() 崩溃
+    val path = stack.lastOrNull() ?: client.rootPath
+    LaunchedEffect(stack.isEmpty()) {
+        if (stack.isEmpty()) stack.add(client.rootPath)
+    }
 
     // 目录列表内存缓存：返回上级/重进目录直接用缓存，不重新请求
     val listCache = remember(source.id) { mutableMapOf<String, List<DavEntry>>() }
@@ -389,7 +395,9 @@ fun BrowseScreen(
     // 视频行进度：整目录一次读入，按 href 匹配
     val historyMap = remember(resumeTick, path) { historyStore.list().associateBy { it.href } }
 
-    BackHandler(enabled = stack.size > 1) { stack.removeAt(stack.size - 1) }
+    BackHandler(enabled = stack.size > 1) {
+        if (stack.size > 1) stack.removeAt(stack.size - 1)
+    }
 
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
@@ -406,7 +414,7 @@ fun BrowseScreen(
             navigationIcon = {
                 // 回上级目录
                 IconButton(
-                    onClick = { stack.removeAt(stack.size - 1) },
+                    onClick = { if (stack.size > 1) stack.removeAt(stack.size - 1) },
                     enabled = stack.size > 1
                 ) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "上级目录")
@@ -810,20 +818,54 @@ private fun MoveFileDialog(
     }
 
     val atRoot = path.trimEnd('/') == rootPath.trimEnd('/')
+    val crumbs = davBreadcrumbs(rootPath, path)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("移动「${entry.name}」") },
+        title = { Text("移动文件") },
         text = {
             Column {
                 Text(
-                    "目标目录：${path}",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    entry.name,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    crumbs.forEachIndexed { index, crumb ->
+                        Text(
+                            crumb.label,
+                            fontSize = 12.sp,
+                            color = if (index == crumbs.lastIndex) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .clickable { path = crumb.path }
+                                .padding(horizontal = 2.dp, vertical = 5.dp)
+                        )
+                        if (index < crumbs.lastIndex) {
+                            Text(
+                                ">",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 2.dp)
+                            )
+                        }
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { path = davParentPath(path) }, enabled = !atRoot) {
+                    TextButton(
+                        onClick = {
+                            val parent = davParentPath(path)
+                            path = if (parent.startsWith(rootPath)) parent else rootPath
+                        },
+                        enabled = !atRoot
+                    ) {
                         Text("↑ 上级")
                     }
                     Spacer(Modifier.weight(1f))
@@ -955,6 +997,17 @@ fun buildPathChain(root: String, target: String?): List<String> {
     }
     return chain
 }
+
+private data class DavBreadcrumb(val label: String, val path: String)
+
+/** 目录面包屑：显示中文、保留真实编码路径用于跳转 */
+private fun davBreadcrumbs(root: String, current: String): List<DavBreadcrumb> =
+    buildPathChain(root, current).mapIndexed { index, path ->
+        DavBreadcrumb(
+            label = if (index == 0) "根目录" else decodeName(path).ifBlank { path },
+            path = path
+        )
+    }
 
 // ==================== 历史 ====================
 
