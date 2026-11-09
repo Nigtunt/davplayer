@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>2.2.2</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>7</string>
 	<!-- Compose Multiplatform 1.7+ 强制要求：缺失会导致启动时 PlistSanityCheck 崩溃 -->
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>

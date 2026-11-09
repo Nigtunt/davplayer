@@ -91,6 +91,14 @@ class Settings(ctx: Context) {
         get() = sp.getString("lastPath", null)
         set(v) = sp.edit().putString("lastPath", v).apply()
 
+    /** 上次移动文件的目标目录（按源隔离） */
+    fun lastMovePath(sourceId: String): String? =
+        sp.getString("lastMovePath.$sourceId", null)?.takeIf { it.isNotBlank() }
+
+    fun setLastMovePath(sourceId: String, path: String) {
+        sp.edit().putString("lastMovePath.$sourceId", path).apply()
+    }
+
     /** 隐私模式：开启后启动显示计算器，输入暗码才进入应用；默认关闭 */
     var privacyMode: Boolean
         get() = sp.getBoolean("privacyMode", false)
@@ -110,9 +118,9 @@ class Settings(ctx: Context) {
         get() = sp.getString("komgaPass", "") ?: ""
         set(v) = sp.edit().putString("komgaPass", v).apply()
 
-    /** "system" | "light" | "dark" */
+    /** "system" | "light" | "dark"；默认跟随系统 */
     var themeMode: String
-        get() = sp.getString("themeMode", "dark") ?: "dark"
+        get() = sp.getString("themeMode", "system") ?: "system"
         set(v) = sp.edit().putString("themeMode", v).apply()
 }
 

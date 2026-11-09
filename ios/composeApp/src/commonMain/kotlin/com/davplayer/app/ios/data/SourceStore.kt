@@ -104,6 +104,14 @@ object SourceStore {
         writeSetting("lastPath.$sourceId", path)
     }
 
+    /** 上次移动文件的目标目录（按源隔离） */
+    fun lastMovePath(sourceId: String): String? =
+        readSetting("lastMovePath.$sourceId")?.takeIf { it.isNotBlank() }
+
+    fun setLastMovePath(sourceId: String, path: String) {
+        writeSetting("lastMovePath.$sourceId", path)
+    }
+
     fun recent(limit: Int = 8): List<PlayProgress> = history.take(limit)
 
     // ---- 存储格式 ----

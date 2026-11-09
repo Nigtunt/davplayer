@@ -43,25 +43,43 @@ private fun cachePut(url: String, bitmap: ImageBitmap) {
 object KomgaImages {
     private val http = HttpClient { expectSuccess = false }
 
-    // 固定在主线程解码：Skia 在 iPad 上并发 decode 会产生堆损坏（见 2026-11-04 crash log）
+    // 网络请求放后台；解码仍固定在主线程（Skia 并发 decode 会堆损坏）
     suspend fun load(
         url: String,
         auth: String,
         maxWidth: Int = 480
-    ): ImageBitmap? = withContext(Dispatchers.Main) {
-        if (ComicStore.safeMode) return@withContext null
-        runCatching {
-            val response = http.get(url) {
-                header(HttpHeaders.Authorization, auth)
-            }
-            if (response.status.value !in 200..299) {
-                AppLog.warn("Komga", "图片 HTTP ${response.status.value}：$url")
-                return@runCatching null
-            }
-            decodeImageBitmap(response.bodyAsBytes(), maxWidth)
-        }.onFailure {
-            AppLog.warn("Komga", "图片加载失败：$url")
-        }.getOrNull()
+    ): ImageBitmap? {
+        if (ComicStore.safeMode) return null
+
+        val bytes = withContext(Dispatchers.Default) {
+            runCatching {
+                val response = http.get(url) {
+                    header(HttpHeaders.Authorization, auth)
+                }
+                if (response.status.value !in 200..299) {
+                    AppLog.warn("Komga", "图片 HTTP ${response.status.value}：$url")
+                    null
+                } else {
+                    response.bodyAsBytes()
+                }
+            }.onFailure {
+                AppLog.warn("Komga", "图片下载失败：$url")
+            }.getOrNull()
+        } ?: return null
+
+        return withContext(Dispatchers.Main) {
+            runCatching { decodeImageBitmap(bytes, maxWidth) }
+                .onFailure { AppLog.warn("Komga", "图片解码失败：$url") }
+                .getOrNull()
+        }
+    }
+
+    /** 阅读器停稳后预取相邻页，真正滑过去时直接命中内存缓存 */
+    suspend fun preload(url: String, auth: String, maxWidth: Int = 1200) {
+        val key = "$maxWidth|$url"
+        if (imageCache[key] != null) return
+        val loaded = load(url, auth, maxWidth) ?: return
+        cachePut(key, loaded)
     }
 }
 

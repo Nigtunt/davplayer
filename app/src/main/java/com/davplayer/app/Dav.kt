@@ -39,6 +39,24 @@ fun isVideoFile(name: String): Boolean =
 fun isUnsupportedVideo(name: String): Boolean =
     name.substringAfterLast('.', "").lowercase() in UNSUPPORTED_EXTS
 
+/** 文件所在目录，保证以 / 结尾 */
+fun davParentPath(href: String): String {
+    val parent = href.trimEnd('/').substringBeforeLast('/', "")
+    return when {
+        parent.isBlank() -> "/"
+        parent.endsWith("/") -> parent
+        else -> "$parent/"
+    }
+}
+
+/** 目标目录 + 原文件名（保留服务器返回的已编码文件名） */
+fun davTargetPath(dir: String, entry: DavEntry): String {
+    val leaf = entry.href.trimEnd('/').substringAfterLast('/').ifBlank {
+        java.net.URLEncoder.encode(entry.name, "UTF-8").replace("+", "%20")
+    }
+    return dir.trimEnd('/') + "/" + leaf
+}
+
 /** 把可能是完整 URL（http://host/dav/x）的 href 归一化成服务器路径（/dav/x） */
 fun davPathOf(href: String): String {
     val h = href.trim()
@@ -167,6 +185,30 @@ class WebDavClient(baseUrl: String, username: String, password: String) {
             event = parser.next()
         }
         return result.sortedWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
+    }
+
+    suspend fun delete(path: String) = withContext(Dispatchers.IO) {
+        val builder = Request.Builder().url(fileUrl(path)).delete()
+        authHeaders().forEach { (k, v) -> builder.header(k, v) }
+        http.newCall(builder.build()).execute().use { resp ->
+            if (resp.code !in 200..299) {
+                throw IOException("删除失败: HTTP ${resp.code} ${resp.message}")
+            }
+        }
+    }
+
+    suspend fun move(from: String, to: String) = withContext(Dispatchers.IO) {
+        val builder = Request.Builder()
+            .url(fileUrl(from))
+            .method("MOVE", null)
+            .header("Destination", fileUrl(to))
+            .header("Overwrite", "T")
+        authHeaders().forEach { (k, v) -> builder.header(k, v) }
+        http.newCall(builder.build()).execute().use { resp ->
+            if (resp.code !in 200..299) {
+                throw IOException("移动失败: HTTP ${resp.code} ${resp.message}")
+            }
+        }
     }
 
     private fun samePath(a: String, b: String): Boolean = a.trimEnd('/') == b.trimEnd('/')

@@ -91,6 +91,34 @@ class DavClient(baseUrl: String, private val user: String, private val pass: Str
         }
         entries
     }
+
+    suspend fun delete(path: String): Unit = withContext(Dispatchers.Default) {
+        val response = http.request(url(path)) {
+            method = HttpMethod("DELETE")
+            authHeader?.let { header(HttpHeaders.Authorization, it) }
+        }
+        val status = response.status.value
+        if (status !in 200..299) {
+            AppLog.error("WebDAV", "DELETE $path -> HTTP $status")
+            throw IllegalStateException("删除失败：HTTP $status")
+        }
+        AppLog.info("WebDAV", "DELETE $path -> HTTP $status")
+    }
+
+    suspend fun move(from: String, to: String): Unit = withContext(Dispatchers.Default) {
+        val response = http.request(url(from)) {
+            method = HttpMethod("MOVE")
+            header("Destination", url(to))
+            header("Overwrite", "T")
+            authHeader?.let { header(HttpHeaders.Authorization, it) }
+        }
+        val status = response.status.value
+        if (status !in 200..299) {
+            AppLog.error("WebDAV", "MOVE $from -> $to HTTP $status")
+            throw IllegalStateException("移动失败：HTTP $status")
+        }
+        AppLog.info("WebDAV", "MOVE $from -> $to HTTP $status")
+    }
 }
 
 /**
@@ -147,6 +175,24 @@ val VIDEO_EXTS = setOf(
 
 fun isVideoFile(name: String): Boolean =
     name.substringAfterLast('.', "").lowercase() in VIDEO_EXTS
+
+/** 文件所在目录，保证以 / 结尾 */
+fun davParentPath(href: String): String {
+    val parent = href.trimEnd('/').substringBeforeLast('/', "")
+    return when {
+        parent.isBlank() -> "/"
+        parent.endsWith("/") -> parent
+        else -> "$parent/"
+    }
+}
+
+/** 目标目录 + 原文件名（保留服务器返回的已编码文件名） */
+fun davTargetPath(dir: String, entry: DavEntry): String {
+    val leaf = entry.href.trimEnd('/').substringAfterLast('/').ifBlank {
+        percentEncode(entry.name)
+    }
+    return dir.trimEnd('/') + "/" + leaf
+}
 
 /** 把 http://host/dav/x 归一化成 /dav/x */
 fun davPathOf(raw: String): String {

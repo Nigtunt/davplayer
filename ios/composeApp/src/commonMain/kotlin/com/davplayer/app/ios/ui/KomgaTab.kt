@@ -33,7 +33,11 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerSnapDistance
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.rememberPagerState
@@ -1042,11 +1046,26 @@ private fun ReaderContent(
         }
     }
 
-    LaunchedEffect(pagerState.currentPage, mode) {
+    // 等翻页停稳后再预热相邻页，避免在 Pager 回弹动画期间占用主线程解码。
+    // 一次只解码一张，先下一页再上一页，避免两张 1200px 图片同时抢主线程。
+    LaunchedEffect(pagerState.settledPage, mode) {
         if (mode != 2) {
-            val next = pagerState.currentPage + 1
-            if (next <= pages.lastIndex) {
-                KomgaImages.load(client.pageUrl(book.id, pages[next].number), client.authHeader, 1200)
+            delay(120)
+            val current = pagerState.settledPage
+            if (current + 1 in pages.indices) {
+                KomgaImages.preload(
+                    client.pageUrl(book.id, pages[current + 1].number),
+                    client.authHeader,
+                    1200
+                )
+            }
+            delay(220)
+            if (current - 1 in pages.indices) {
+                KomgaImages.preload(
+                    client.pageUrl(book.id, pages[current - 1].number),
+                    client.authHeader,
+                    1200
+                )
             }
         }
     }
@@ -1139,6 +1158,14 @@ private fun ReaderContent(
                     state = pagerState,
                     reverseLayout = mode == 1,
                     userScrollEnabled = !zoomed,
+                    flingBehavior = PagerDefaults.flingBehavior(
+                        state = pagerState,
+                        pagerSnapDistance = PagerSnapDistance.atMost(1),
+                        snapAnimationSpec = tween(
+                            durationMillis = 220,
+                            easing = FastOutSlowInEasing
+                        )
+                    ),
                     modifier = Modifier.fillMaxSize()
                 ) { index ->
                     ZoomablePage(

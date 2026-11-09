@@ -5,6 +5,8 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -12,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -36,15 +39,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,6 +69,7 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -325,6 +333,12 @@ fun BrowseScreen(
     var sourceMenuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    // 文件操作：右滑显示删除/移动，移动目标目录会记住上次位置
+    var deleteTarget by remember { mutableStateOf<DavEntry?>(null) }
+    var moveTarget by remember { mutableStateOf<DavEntry?>(null) }
+    var actionBusy by remember { mutableStateOf(false) }
+    var actionError by remember { mutableStateOf<String?>(null) }
+
     // 每个目录一份独立的滚动状态：进入子目录再返回上级，自动回到离开时的位置
     val listState = listStates.getOrPut(path) { LazyListState() }
 
@@ -453,7 +467,7 @@ fun BrowseScreen(
                 val visible = entries!!.filter { it.isDir || isVideoFile(it.name) }
                 LazyColumn(Modifier.fillMaxSize(), state = listState) {
                     items(visible, key = { it.href }) { entry ->
-                        BrowseRow(
+                        SwipeableBrowseRow(
                             entry = entry,
                             history = historyMap[entry.href],
                             historyStore = historyStore,
@@ -467,12 +481,88 @@ fun BrowseScreen(
                                         startPlayer(ctx, entry.href, entry.name, pos)
                                     }
                                 }
-                            }
+                            },
+                            onDelete = { deleteTarget = entry },
+                            onMove = { moveTarget = entry }
                         )
                     }
                 }
             }
         }
+    }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { if (!actionBusy) deleteTarget = null },
+            title = { Text("删除文件") },
+            text = { Text("确定删除「${target.name}」？删除后无法恢复。") },
+            confirmButton = {
+                TextButton(
+                    enabled = !actionBusy,
+                    onClick = {
+                        actionBusy = true
+                        scope.launch {
+                            runCatching { client.delete(target.href) }
+                                .onSuccess {
+                                    deleteTarget = null
+                                    listCache.remove(path)
+                                    entries = entries?.filterNot { it.href == target.href }
+                                    refreshTick++
+                                }
+                                .onFailure {
+                                    actionError = it.message ?: "删除失败"
+                                    deleteTarget = null
+                                }
+                            actionBusy = false
+                        }
+                    }
+                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(enabled = !actionBusy, onClick = { deleteTarget = null }) { Text("取消") }
+            }
+        )
+    }
+
+    moveTarget?.let { target ->
+        val initial = settings.lastMovePath(source.id)
+            ?.takeIf { it.startsWith(client.rootPath) }
+            ?: davParentPath(target.href)
+        MoveFileDialog(
+            client = client,
+            entry = target,
+            initialPath = initial,
+            rootPath = client.rootPath,
+            busy = actionBusy,
+            onDismiss = { if (!actionBusy) moveTarget = null },
+            onPick = { dir ->
+                actionBusy = true
+                scope.launch {
+                    runCatching { client.move(target.href, davTargetPath(dir, target)) }
+                        .onSuccess {
+                            settings.setLastMovePath(source.id, dir)
+                            moveTarget = null
+                            listCache.remove(path)
+                            entries = entries?.filterNot { it.href == target.href }
+                            refreshTick++
+                        }
+                        .onFailure {
+                            actionError = it.message ?: "移动失败"
+                            moveTarget = null
+                        }
+                    actionBusy = false
+                }
+            }
+        )
+    }
+
+    actionError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { actionError = null },
+            title = { Text("操作失败") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { actionError = null }) { Text("好") } }
+        )
     }
 }
 
@@ -603,6 +693,185 @@ private fun BrowseRow(
     }
 }
 
+@Composable
+private fun SwipeableBrowseRow(
+    entry: DavEntry,
+    history: HistoryItem?,
+    historyStore: HistoryStore,
+    resumeTick: Int,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+    onMove: () -> Unit
+) {
+    if (entry.isDir) {
+        BrowseRow(entry, history, historyStore, resumeTick, onClick)
+        return
+    }
+
+    val actionWidth = 156.dp
+    val actionWidthPx = with(LocalDensity.current) { actionWidth.toPx() }
+    var dragOffset by remember(entry.href) { mutableStateOf(0f) }
+    val scope = rememberCoroutineScope()
+
+    fun settle(target: Float) {
+        scope.launch {
+            animate(dragOffset, target, animationSpec = tween(180)) { value, _ ->
+                dragOffset = value
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .matchParentSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(start = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SwipeAction("删除", MaterialTheme.colorScheme.error) {
+                settle(0f)
+                onDelete()
+            }
+            SwipeAction("移动", MaterialTheme.colorScheme.primary) {
+                settle(0f)
+                onMove()
+            }
+        }
+
+        Box(
+            Modifier
+                .offset { IntOffset(dragOffset.roundToInt(), 0) }
+                .background(MaterialTheme.colorScheme.background)
+                .pointerInput(entry.href) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            settle(if (dragOffset > actionWidthPx / 2f) actionWidthPx else 0f)
+                        },
+                        onDragCancel = { settle(0f) },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            dragOffset = (dragOffset + dragAmount).coerceIn(0f, actionWidthPx)
+                        }
+                    )
+                }
+        ) {
+            BrowseRow(
+                entry = entry,
+                history = history,
+                historyStore = historyStore,
+                resumeTick = resumeTick,
+                onClick = {
+                    if (dragOffset > 1f) settle(0f) else onClick()
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SwipeAction(label: String, color: Color, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .width(74.dp)
+            .fillMaxHeight()
+            .padding(vertical = 8.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(color)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun MoveFileDialog(
+    client: WebDavClient,
+    entry: DavEntry,
+    initialPath: String,
+    rootPath: String,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onPick: (String) -> Unit
+) {
+    var path by remember(entry.href, initialPath) { mutableStateOf(initialPath) }
+    var dirs by remember { mutableStateOf<List<DavEntry>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var reload by remember { mutableStateOf(0) }
+
+    LaunchedEffect(path, reload) {
+        dirs = null
+        error = null
+        runCatching { client.list(path).filter { it.isDir } }
+            .onSuccess { dirs = it }
+            .onFailure { error = it.message ?: "加载失败" }
+    }
+
+    val atRoot = path.trimEnd('/') == rootPath.trimEnd('/')
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("移动「${entry.name}」") },
+        text = {
+            Column {
+                Text(
+                    "目标目录：${path}",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { path = davParentPath(path) }, enabled = !atRoot) {
+                        Text("↑ 上级")
+                    }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { reload++ }) { Text("刷新") }
+                }
+                when {
+                    error != null -> Text("加载失败：$error", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                    dirs == null -> Box(
+                        Modifier.fillMaxWidth().padding(20.dp),
+                        contentAlignment = Alignment.Center
+                    ) { CircularProgressIndicator() }
+                    dirs!!.isEmpty() -> Text(
+                        "没有子文件夹，可以直接移动到这里",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    else -> LazyColumn(Modifier.heightIn(max = 280.dp)) {
+                        items(dirs!!, key = { it.href }) { dir ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        path = if (dir.href.endsWith("/")) dir.href else dir.href + "/"
+                                    }
+                                    .padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(8.dp))
+                                Text(dir.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onPick(if (path.endsWith("/")) path else "$path/") },
+                enabled = !busy
+            ) { Text(if (busy) "移动中…" else "移动到这里") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") }
+        }
+    )
+}
+
 /**
  * 列表里的名称：默认折叠 [collapsedLines] 行，被截断时点标题即可展开看完整名称。
  * 点击「展开全名 / 收起」或直接点文字都能切换。
@@ -717,7 +986,6 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
         else KomgaClient(settings.komgaUrl, settings.komgaUser, settings.komgaPass)
     }
     val komgaLoader = remember { komgaClient?.let { buildKomgaImageLoader(ctx, it) } }
-    val scope = rememberCoroutineScope()
 
     // 漫画历史完全来自 Komga 服务端，不再读取本地漫画进度
     var comics by remember(komgaClient) { mutableStateOf<List<KomgaBook>?>(null) }
@@ -938,14 +1206,6 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
                                             fontSize = 11.sp,
                                             color = extra.textMuted
                                         )
-                                    }
-                                    IconButton(onClick = {
-                                        scope.launch {
-                                            runCatching { client.deleteReadProgress(item.id) }
-                                            comicReload++
-                                        }
-                                    }) {
-                                        Icon(Icons.Default.Delete, "标记为未读", tint = extra.textMuted, modifier = Modifier.size(20.dp))
                                     }
                                 }
                             }
