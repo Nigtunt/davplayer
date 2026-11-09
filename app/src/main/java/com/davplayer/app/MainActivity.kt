@@ -41,6 +41,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -716,7 +717,7 @@ private fun SwipeableBrowseRow(
         return
     }
 
-    val actionWidth = 156.dp
+    val actionWidth = 152.dp
     val actionWidthPx = with(LocalDensity.current) { actionWidth.toPx() }
     var dragOffset by remember(entry.href) { mutableStateOf(0f) }
     val scope = rememberCoroutineScope()
@@ -729,13 +730,13 @@ private fun SwipeableBrowseRow(
         }
     }
 
-    Box(Modifier.fillMaxWidth()) {
+    Box(Modifier.fillMaxWidth().clipToBounds()) {
         Row(
             Modifier
                 .matchParentSize()
                 .background(MaterialTheme.colorScheme.background)
-                .padding(start = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(end = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             verticalAlignment = Alignment.CenterVertically
         ) {
             SwipeAction("删除", MaterialTheme.colorScheme.error) {
@@ -755,12 +756,16 @@ private fun SwipeableBrowseRow(
                 .pointerInput(entry.href) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
-                            settle(if (dragOffset > actionWidthPx / 2f) actionWidthPx else 0f)
+                            settle(if (dragOffset < -actionWidthPx / 2f) -actionWidthPx else 0f)
                         },
                         onDragCancel = { settle(0f) },
                         onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            dragOffset = (dragOffset + dragAmount).coerceIn(0f, actionWidthPx)
+                            // 只处理左滑；右滑关闭已展开的行时也允许回弹
+                            if (dragOffset < 0f || dragAmount < 0f) {
+                                change.consume()
+                                dragOffset = (dragOffset + dragAmount)
+                                    .coerceIn(-actionWidthPx, 0f)
+                            }
                         }
                     )
                 }
@@ -771,7 +776,7 @@ private fun SwipeableBrowseRow(
                 historyStore = historyStore,
                 resumeTick = resumeTick,
                 onClick = {
-                    if (dragOffset > 1f) settle(0f) else onClick()
+                    if (dragOffset < -1f) settle(0f) else onClick()
                 }
             )
         }
@@ -782,7 +787,7 @@ private fun SwipeableBrowseRow(
 private fun SwipeAction(label: String, color: Color, onClick: () -> Unit) {
     Box(
         Modifier
-            .width(74.dp)
+            .width(64.dp)
             .fillMaxHeight()
             .padding(vertical = 8.dp)
             .clip(RoundedCornerShape(10.dp))
@@ -790,7 +795,7 @@ private fun SwipeAction(label: String, color: Color, onClick: () -> Unit) {
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -871,31 +876,34 @@ private fun MoveFileDialog(
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = { reload++ }) { Text("刷新") }
                 }
+                val currentDirs = dirs
                 when {
                     error != null -> Text("加载失败：$error", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-                    dirs == null -> Box(
+                    currentDirs == null -> Box(
                         Modifier.fillMaxWidth().padding(20.dp),
                         contentAlignment = Alignment.Center
                     ) { CircularProgressIndicator() }
-                    dirs!!.isEmpty() -> Text(
+                    currentDirs.isEmpty() -> Text(
                         "没有子文件夹，可以直接移动到这里",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    else -> LazyColumn(Modifier.heightIn(max = 280.dp)) {
-                        items(dirs!!, key = { it.href }) { dir ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        path = if (dir.href.endsWith("/")) dir.href else dir.href + "/"
-                                    }
-                                    .padding(vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(8.dp))
-                                Text(dir.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    else -> {
+                        LazyColumn(Modifier.heightIn(max = 280.dp)) {
+                            items(currentDirs, key = { it.href }) { dir ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            path = if (dir.href.endsWith("/")) dir.href else dir.href + "/"
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(dir.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
                             }
                         }
                     }
