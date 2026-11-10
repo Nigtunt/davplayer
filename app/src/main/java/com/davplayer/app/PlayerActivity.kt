@@ -469,6 +469,10 @@ fun PlayerScreen(
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { controlsVisible.value = !controlsVisible.value },
+                        onDoubleTap = {
+                            // 双击画面在竖屏 / 横屏全屏之间切换
+                            activity.setFullscreen(!fullscreen.value)
+                        },
                         onLongPress = {
                             boosting.value = true
                             player.setPlaybackSpeed(settings.longPressSpeed)
@@ -694,7 +698,7 @@ fun PlayerScreen(
                     IconButton(onClick = { activity.setFullscreen(!fullscreen.value) }) {
                         Icon(
                             if (fullscreen.value) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                            "全屏",
+                            if (fullscreen.value) "退出横屏全屏" else "横屏全屏",
                             tint = Color.White
                         )
                     }

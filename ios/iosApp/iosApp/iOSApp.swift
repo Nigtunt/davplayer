@@ -1,9 +1,42 @@
 import SwiftUI
+import UIKit
 import ComposeApp
+
+/// 让 App 先接住左右边缘滑动，避免 iPadOS 把边缘手势识别成切 App。
+private final class EdgeDeferringHostController: UIViewController {
+    private let child: UIViewController
+
+    init(child: UIViewController) {
+        self.child = child
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge {
+        [.left, .right]
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        addChild(child)
+        child.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(child.view)
+        NSLayoutConstraint.activate([
+            child.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            child.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            child.view.topAnchor.constraint(equalTo: view.topAnchor),
+            child.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        child.didMove(toParent: self)
+    }
+}
 
 struct ComposeView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
-        MainViewControllerKt.MainViewController()
+        EdgeDeferringHostController(child: MainViewControllerKt.MainViewController())
     }
 
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}

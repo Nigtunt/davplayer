@@ -6,9 +6,11 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -68,6 +70,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -96,6 +99,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 private sealed interface KomgaRoute {
     data object Home : KomgaRoute
@@ -1100,7 +1104,8 @@ private fun ReaderContent(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Column(Modifier.fillMaxSize()) {
         if (showControls) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
@@ -1219,7 +1224,40 @@ private fun ReaderContent(
             )
         }
         }
+        }
+        EdgeBackGesture(Alignment.CenterStart, onBack)
+        EdgeBackGesture(Alignment.CenterEnd, onBack)
     }
+}
+
+@Composable
+private fun BoxScope.EdgeBackGesture(
+    alignment: Alignment,
+    onBack: () -> Unit
+) {
+    var totalDrag by remember { mutableStateOf(0f) }
+    val threshold = with(LocalDensity.current) { 52.dp.toPx() }
+    Box(
+        Modifier
+            .align(alignment)
+            .padding(top = 64.dp)
+            .width(24.dp)
+            .fillMaxHeight()
+            .pointerInput(onBack) {
+                detectHorizontalDragGestures(
+                    onDragStart = { totalDrag = 0f },
+                    onDragEnd = {
+                        if (abs(totalDrag) > threshold) onBack()
+                        totalDrag = 0f
+                    },
+                    onDragCancel = { totalDrag = 0f },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        totalDrag += dragAmount
+                    }
+                )
+            }
+    )
 }
 
 @Composable
