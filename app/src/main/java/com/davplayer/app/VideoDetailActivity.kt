@@ -9,6 +9,9 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -36,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
@@ -220,6 +224,7 @@ class VideoDetailActivity : ComponentActivity() {
                     subtitleName = subtitleName.value,
                     subtitleSize = subtitleSize,
                     player = exo,
+                    longPressSpeed = settings.longPressSpeed,
                     error = when {
                         source == null -> "没有可用的 WebDAV 源"
                         unsupported -> unsupportedMessage(title.ifBlank { href })
@@ -360,6 +365,7 @@ private fun VideoDetailScreen(
     subtitleName: String?,
     subtitleSize: Long,
     player: ExoPlayer?,
+    longPressSpeed: Float,
     error: String?,
     client: WebDavClient?,
     embedded: List<Tracks.Group>,
@@ -401,6 +407,7 @@ private fun VideoDetailScreen(
                     player = player,
                     title = title,
                     quality = meta.labels.firstOrNull(),
+                    longPressSpeed = longPressSpeed,
                     fullscreen = true,
                     onBack = onBack,
                     onToggleFullscreen = onToggleFullscreen,
@@ -420,6 +427,7 @@ private fun VideoDetailScreen(
                     player = player,
                     title = title,
                     quality = meta.labels.firstOrNull(),
+                    longPressSpeed = longPressSpeed,
                     fullscreen = false,
                     onBack = onBack,
                     onToggleFullscreen = onToggleFullscreen,
@@ -641,6 +649,7 @@ private fun InlineVideoPlayer(
     player: ExoPlayer,
     title: String,
     quality: String?,
+    longPressSpeed: Float,
     fullscreen: Boolean,
     onBack: () -> Unit,
     onToggleFullscreen: () -> Unit,
@@ -655,7 +664,10 @@ private fun InlineVideoPlayer(
     var position by remember { mutableLongStateOf(player.currentPosition.coerceAtLeast(0)) }
     var duration by remember { mutableLongStateOf(player.duration.coerceAtLeast(0)) }
     var seekFraction by remember { mutableStateOf<Float?>(null) }
+    var seekPreview by remember { mutableStateOf<Long?>(null) }
     var speed by remember { mutableFloatStateOf(1f) }
+    var boosting by remember { mutableStateOf(false) }
+    var controlsVisible by remember { mutableStateOf(true) }
     var menuOpen by remember { mutableStateOf(false) }
 
     DisposableEffect(player) {
@@ -692,6 +704,13 @@ private fun InlineVideoPlayer(
         }
     }
 
+    LaunchedEffect(controlsVisible, playing) {
+        if (controlsVisible && playing) {
+            delay(4000)
+            controlsVisible = false
+        }
+    }
+
     Box(modifier.background(Color.Black)) {
         AndroidView(
             factory = { ctx ->
@@ -709,10 +728,91 @@ private fun InlineVideoPlayer(
             modifier = Modifier.fillMaxSize()
         )
 
+        // 空白区域手势：单击显隐控制层，双击全屏，长按临时倍速，横滑调进度
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(controlsVisible, playing) {
+                    detectTapGestures(
+                        onTap = { controlsVisible = !controlsVisible },
+                        onDoubleTap = { onToggleFullscreen() },
+                        onLongPress = {
+                            boosting = true
+                            player.setPlaybackSpeed(longPressSpeed)
+                        },
+                        onPress = {
+                            awaitRelease()
+                            if (boosting) {
+                                player.setPlaybackSpeed(speed)
+                                boosting = false
+                            }
+                        }
+                    )
+                }
+                .pointerInput(duration) {
+                    var target = 0L
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            target = player.currentPosition.coerceAtLeast(0)
+                            seekPreview = target
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            val dur = player.duration
+                            if (dur > 0) {
+                                target = (target + dragAmount / size.width * 120_000).toLong()
+                                    .coerceIn(0, dur)
+                                seekPreview = target
+                            }
+                        },
+                        onDragEnd = {
+                            seekPreview?.let { player.seekTo(it) }
+                            seekPreview = null
+                        },
+                        onDragCancel = { seekPreview = null }
+                    )
+                }
+        )
+
+        if (boosting) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp),
+                color = Color.Black.copy(alpha = 0.62f),
+                shape = RoundedCornerShape(999.dp)
+            ) {
+                Text(
+                    "⚡ ${"%.1f".format(longPressSpeed)}x 播放中",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                    color = Color.White,
+                    fontSize = 11.sp
+                )
+            }
+        }
+
+        seekPreview?.let { target ->
+            Surface(
+                modifier = Modifier.align(Alignment.Center),
+                color = Color.Black.copy(alpha = 0.82f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    "${formatMs(target)} / ${formatMs(duration)}",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    color = Color.White,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .align(Alignment.TopCenter)
                 .background(
                     Brush.verticalGradient(
                         listOf(Color.Black.copy(alpha = 0.72f), Color.Transparent)
@@ -768,47 +868,49 @@ private fun InlineVideoPlayer(
                             onExternalPlay()
                         }
                     )
-                    DropdownMenuItem(
-                        text = { Text(if (fullscreen) "退出全屏" else "全屏") },
-                        leadingIcon = { Icon(Icons.Default.Fullscreen, null) },
-                        onClick = {
-                            menuOpen = false
-                            onToggleFullscreen()
-                        }
-                    )
                 }
             }
         }
-
-        Box(
-            Modifier
-                .align(Alignment.Center)
-                .size(if (fullscreen) 62.dp else 50.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.38f))
-                .clickable {
-                    if (player.isPlaying) player.pause() else player.play()
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                if (playing) "暂停" else "播放",
-                tint = Color.White,
-                modifier = Modifier.size(if (fullscreen) 32.dp else 26.dp)
-            )
         }
 
+        if (controlsVisible) {
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .size(if (fullscreen) 62.dp else 50.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.38f))
+                    .clickable {
+                        if (player.isPlaying) player.pause() else player.play()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    if (playing) "暂停" else "播放",
+                    tint = Color.White,
+                    modifier = Modifier.size(if (fullscreen) 32.dp else 26.dp)
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
         Column(
             Modifier
-                .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .background(
                     Brush.verticalGradient(
                         listOf(Color.Transparent, Color.Black.copy(alpha = 0.82f))
                     )
                 )
-                .padding(horizontal = 10.dp, vertical = 5.dp)
+                .navigationBarsPadding()
+                .padding(horizontal = 10.dp)
+                .padding(top = 8.dp, bottom = 12.dp)
         ) {
             val dur = duration.coerceAtLeast(1L)
             val fraction = (seekFraction ?: (position.toFloat() / dur.toFloat())).coerceIn(0f, 1f)
@@ -879,9 +981,21 @@ private fun InlineVideoPlayer(
                         fontWeight = FontWeight.SemiBold
                     )
                 }
+                IconButton(
+                    onClick = onToggleFullscreen,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        if (fullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        if (fullscreen) "退出全屏" else "全屏",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }
+}
 }
 
 @Composable
