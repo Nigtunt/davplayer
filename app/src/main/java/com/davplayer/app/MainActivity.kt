@@ -2050,20 +2050,6 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
                                     color = extra.textMuted
                                 )
                             }
-                            Box(
-                                Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(MaterialTheme.colorScheme.primaryContainer)
-                                    .clickable { startVideoDetail(ctx, item.href, item.title, item.positionMs) }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                            ) {
-                                Text(
-                                    "继续",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
                         }
                         // 长按菜单：跳转到视频所在目录 / 删除记录
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {

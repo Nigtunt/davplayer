@@ -117,7 +117,7 @@ class VideoDetailActivity : ComponentActivity() {
     private var videoUrl = ""
     private var videoHref = ""
     private var videoTitle = ""
-    private var coverCaptured = false
+    private var lastCoverCaptureAt = 0L
     private val historyStore by lazy { HistoryStore(this) }
     private val fullscreen = mutableStateOf(false)
     private val embeddedGroups = mutableStateOf<List<Tracks.Group>>(emptyList())
@@ -263,16 +263,18 @@ class VideoDetailActivity : ComponentActivity() {
         }
     }
 
-    private fun captureCover(texture: TextureView): Boolean {
-        if (coverCaptured || videoHref.isBlank()) return coverCaptured
-        val bitmap = texture.bitmap ?: return false
-        return runCatching {
+    private fun captureCover(texture: TextureView) {
+        if (videoHref.isBlank()) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        // 同一张封面每 10 秒覆盖一次，避免生成大量文件
+        if (lastCoverCaptureAt > 0 && now - lastCoverCaptureAt < 10_000L) return
+        val bitmap = texture.bitmap ?: return
+        runCatching {
             historyStore.coverFile(videoHref).outputStream().use { output ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 86, output)
             }
-            coverCaptured = true
-            true
-        }.getOrDefault(false)
+            lastCoverCaptureAt = now
+        }
     }
 
     private fun loadSubtitle(entry: DavEntry) {
@@ -373,7 +375,7 @@ private fun VideoDetailScreen(
     fullscreen: Boolean,
     onBack: () -> Unit,
     onToggleFullscreen: () -> Unit,
-    onCaptureCover: (TextureView) -> Boolean,
+    onCaptureCover: (TextureView) -> Unit,
     onPickSubtitle: (DavEntry) -> Unit,
     onSelectEmbedded: (Tracks.Group) -> Unit,
     onDisableSubtitles: () -> Unit
@@ -655,12 +657,11 @@ private fun InlineVideoPlayer(
     onToggleFullscreen: () -> Unit,
     onCopyLink: () -> Unit,
     onExternalPlay: () -> Unit,
-    onCaptureCover: (TextureView) -> Boolean,
+    onCaptureCover: (TextureView) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var playing by remember { mutableStateOf(player.isPlaying) }
     var textureView by remember { mutableStateOf<TextureView?>(null) }
-    var coverRequested by remember { mutableStateOf(false) }
     var position by remember { mutableLongStateOf(player.currentPosition.coerceAtLeast(0)) }
     var duration by remember { mutableLongStateOf(player.duration.coerceAtLeast(0)) }
     var seekFraction by remember { mutableStateOf<Float?>(null) }
@@ -696,11 +697,9 @@ private fun InlineVideoPlayer(
         }
     }
 
-    LaunchedEffect(textureView, playing, position) {
-        if (!coverRequested && position > 1200) {
-            textureView?.let {
-                if (onCaptureCover(it)) coverRequested = true
-            }
+    LaunchedEffect(textureView, position) {
+        if (position > 1200) {
+            textureView?.let { onCaptureCover(it) }
         }
     }
 
