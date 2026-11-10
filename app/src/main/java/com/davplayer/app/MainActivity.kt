@@ -1921,15 +1921,19 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
     var comics by remember(komgaClient) { mutableStateOf<List<KomgaBook>?>(null) }
     var comicError by remember(komgaClient) { mutableStateOf<String?>(null) }
     var comicReload by remember(komgaClient) { mutableStateOf(0) }
+    var comicLoading by remember(komgaClient) { mutableStateOf(false) }
 
     LaunchedEffect(seg, resumeTick, comicReload, komgaClient) {
         if (seg == 1 && komgaClient != null) {
-            comics = null
+            // 刷新时保留旧列表，避免切换漫画/视频瞬间 comics 变 null 被 UI 读取
+            comicLoading = true
             comicError = null
             try {
                 comics = komgaClient.readBooks()
             } catch (e: Exception) {
                 comicError = e.message ?: "加载失败"
+            } finally {
+                comicLoading = false
             }
         }
     }
@@ -2097,6 +2101,7 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
             }
         } else {
             // ---------- 漫画历史：服务端 Komga 进度 ----------
+            val comicList = comics
             when {
                 komgaClient == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("请先在「我的」里配置 Komga 服务器", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -2108,17 +2113,17 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
                         Button(onClick = { comicReload++ }) { Text("重试") }
                     }
                 }
-                comics == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                comicList == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-                comics!!.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                comicList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("暂无漫画阅读历史", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 else -> {
                     val client = komgaClient!!
                     val listContent: @Composable () -> Unit = {
                         LazyColumn(Modifier.fillMaxSize()) {
-                            items(comics!!, key = { it.id }) { item ->
+                            items(comicList, key = { it.id }) { item ->
                                 val time = item.progressTimestamp.take(16).replace('T', ' ')
                                 Row(
                                     Modifier

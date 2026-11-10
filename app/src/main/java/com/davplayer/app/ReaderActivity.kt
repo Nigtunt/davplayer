@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -58,16 +59,31 @@ class ReaderActivity : ComponentActivity() {
         const val EXTRA_PAGE = "page"
     }
 
+    private fun closeReader() {
+        // 明确回到主界面，避免部分系统/任务栈场景下 finish 后直接露出桌面
+        startActivity(
+            Intent(this, MainActivity::class.java).addFlags(
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            )
+        )
+        finish()
+    }
+
     override fun onResume() {
         super.onResume()
         // 隐私模式重新上锁后，不允许停留在阅读器
         if (PrivacyGate.locked) {
-            finish()
+            closeReader()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                closeReader()
+            }
+        })
         val bookId = intent.getStringExtra(EXTRA_BOOK_ID) ?: run { finish(); return }
         val title = intent.getStringExtra(EXTRA_TITLE) ?: ""
         val seriesTitle = intent.getStringExtra(EXTRA_SERIES) ?: ""
@@ -86,7 +102,7 @@ class ReaderActivity : ComponentActivity() {
                     title = title,
                     seriesTitle = seriesTitle,
                     startPage = startPage,
-                    onBack = { finish() }
+                    onBack = { closeReader() }
                 )
             }
         }

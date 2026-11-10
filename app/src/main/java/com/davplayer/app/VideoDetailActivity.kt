@@ -1,7 +1,10 @@
 package com.davplayer.app
 
 import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
 import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.TextureView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -110,6 +113,7 @@ class VideoDetailActivity : ComponentActivity() {
     private var videoUrl = ""
     private var videoHref = ""
     private var videoTitle = ""
+    private var coverCaptured = false
     private val historyStore by lazy { HistoryStore(this) }
     private val fullscreen = mutableStateOf(false)
     private val embeddedGroups = mutableStateOf<List<Tracks.Group>>(emptyList())
@@ -230,6 +234,7 @@ class VideoDetailActivity : ComponentActivity() {
                         if (fullscreen.value) setPlayerFullscreen(false) else finish()
                     },
                     onToggleFullscreen = { setPlayerFullscreen(!fullscreen.value) },
+                    onCaptureCover = { texture -> captureCover(texture) },
                     onPickSubtitle = { entry -> loadSubtitle(entry) },
                     onSelectEmbedded = { group ->
                         player?.let {
@@ -251,6 +256,18 @@ class VideoDetailActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun captureCover(texture: TextureView): Boolean {
+        if (coverCaptured || videoHref.isBlank()) return coverCaptured
+        val bitmap = texture.bitmap ?: return false
+        return runCatching {
+            historyStore.coverFile(videoHref).outputStream().use { output ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 86, output)
+            }
+            coverCaptured = true
+            true
+        }.getOrDefault(false)
     }
 
     private fun loadSubtitle(entry: DavEntry) {
@@ -350,6 +367,7 @@ private fun VideoDetailScreen(
     fullscreen: Boolean,
     onBack: () -> Unit,
     onToggleFullscreen: () -> Unit,
+    onCaptureCover: (TextureView) -> Boolean,
     onPickSubtitle: (DavEntry) -> Unit,
     onSelectEmbedded: (Tracks.Group) -> Unit,
     onDisableSubtitles: () -> Unit
@@ -388,6 +406,7 @@ private fun VideoDetailScreen(
                     onToggleFullscreen = onToggleFullscreen,
                     onCopyLink = copyLink,
                     onExternalPlay = externalPlay,
+                    onCaptureCover = onCaptureCover,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
@@ -406,6 +425,7 @@ private fun VideoDetailScreen(
                     onToggleFullscreen = onToggleFullscreen,
                     onCopyLink = copyLink,
                     onExternalPlay = externalPlay,
+                    onCaptureCover = onCaptureCover,
                     modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
                 )
             } else {
@@ -626,9 +646,12 @@ private fun InlineVideoPlayer(
     onToggleFullscreen: () -> Unit,
     onCopyLink: () -> Unit,
     onExternalPlay: () -> Unit,
+    onCaptureCover: (TextureView) -> Boolean,
     modifier: Modifier = Modifier
 ) {
     var playing by remember { mutableStateOf(player.isPlaying) }
+    var textureView by remember { mutableStateOf<TextureView?>(null) }
+    var coverRequested by remember { mutableStateOf(false) }
     var position by remember { mutableLongStateOf(player.currentPosition.coerceAtLeast(0)) }
     var duration by remember { mutableLongStateOf(player.duration.coerceAtLeast(0)) }
     var seekFraction by remember { mutableStateOf<Float?>(null) }
@@ -661,16 +684,27 @@ private fun InlineVideoPlayer(
         }
     }
 
+    LaunchedEffect(textureView, playing, position) {
+        if (!coverRequested && position > 1200) {
+            textureView?.let {
+                if (onCaptureCover(it)) coverRequested = true
+            }
+        }
+    }
+
     Box(modifier.background(Color.Black)) {
         AndroidView(
-            factory = {
-                PlayerView(it).apply {
+            factory = { ctx ->
+                (LayoutInflater.from(ctx).inflate(R.layout.view_player_texture, null) as PlayerView).apply {
                     this.player = player
                     useController = false
                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                     setBackgroundColor(android.graphics.Color.BLACK)
                 }
+            },
+            update = { view ->
+                textureView = view.getVideoSurfaceView() as? TextureView
             },
             modifier = Modifier.fillMaxSize()
         )
