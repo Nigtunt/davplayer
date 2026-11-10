@@ -1154,6 +1154,7 @@ private fun BrowseRow(
     val isSubtitle = isSubtitleFile(entry.name)
     val meta = if (isVideoFile(entry.name)) parseVideoMeta(entry.name) else VideoMeta()
     val unsupported = isVideoFile(entry.name) && isUnsupportedVideo(entry.name)
+    val contentHeight = if (isSubtitle) 56.dp else 66.dp
 
     Row(
         Modifier
@@ -1168,7 +1169,7 @@ private fun BrowseRow(
     ) {
         Box(
             Modifier
-                .size(if (isSubtitle) 56.dp else 116.dp, if (isSubtitle) 56.dp else 66.dp)
+                .size(if (isSubtitle) 56.dp else 116.dp, contentHeight)
                 .clip(RoundedCornerShape(12.dp))
                 .background(
                     if (isSubtitle) MaterialTheme.colorScheme.primaryContainer
@@ -1218,13 +1219,16 @@ private fun BrowseRow(
 
         Spacer(Modifier.width(12.dp))
 
-        Column(Modifier.weight(1f).heightIn(min = if (isSubtitle) 56.dp else 66.dp)) {
+        Column(
+            Modifier.weight(1f).height(contentHeight),
+            verticalArrangement = Arrangement.Center
+        ) {
             Text(
                 entry.name,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
+                maxLines = if (isSubtitle) 2 else 1,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(5.dp))

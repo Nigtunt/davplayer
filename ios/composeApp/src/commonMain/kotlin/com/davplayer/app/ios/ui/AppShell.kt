@@ -63,6 +63,7 @@ import com.davplayer.app.ios.theme.Hairline
 import com.davplayer.app.ios.theme.Muted
 import com.davplayer.app.ios.theme.SurfaceBg
 import com.davplayer.app.ios.theme.SurfaceHigh
+import com.davplayer.app.ios.theme.TextMain
 
 /** 与 Android 端一致的四个顶层入口 */
 enum class AppTab(val label: String, val icon: ImageVector) {
@@ -76,7 +77,10 @@ enum class AppTab(val label: String, val icon: ImageVector) {
 private val WideBreakpoint = 840.dp
 
 @Composable
-fun AppShell() {
+fun AppShell(
+    themeMode: String,
+    onThemeChange: (String) -> Unit
+) {
     var tab by remember { mutableStateOf(AppTab.Browse) }
     var activeSourceId by remember { mutableStateOf<String?>(SourceStore.sources.firstOrNull()?.id) }
     var initialPath by remember { mutableStateOf<String?>(null) }
@@ -125,7 +129,9 @@ fun AppShell() {
                 onHistoryConsumed = {
                     highlightHref = null
                     initialPath = null
-                }
+                },
+                themeMode = themeMode,
+                onThemeChange = onThemeChange
             )
         }
 
@@ -155,7 +161,9 @@ private fun TabContent(
     onOpenPrivacy: () -> Unit,
     onResumeComic: (KomgaBook) -> Unit,
     onKomgaConsumed: () -> Unit,
-    onHistoryConsumed: () -> Unit
+    onHistoryConsumed: () -> Unit,
+    themeMode: String,
+    onThemeChange: (String) -> Unit
 ) {
     when (tab) {
         AppTab.Browse -> {
@@ -192,7 +200,9 @@ private fun TabContent(
 
         AppTab.Settings -> SettingsTab(
             onOpenSource = { onOpenSource(it, null, null) },
-            onOpenPrivacy = onOpenPrivacy
+            onOpenPrivacy = onOpenPrivacy,
+            themeMode = themeMode,
+            onThemeChange = onThemeChange
         )
     }
 }
@@ -273,7 +283,12 @@ private fun BottomTabs(selected: AppTab, onSelect: (AppTab) -> Unit) {
 }
 
 @Composable
-private fun SettingsTab(onOpenSource: (DavSource) -> Unit, onOpenPrivacy: () -> Unit) {
+private fun SettingsTab(
+    onOpenSource: (DavSource) -> Unit,
+    onOpenPrivacy: () -> Unit,
+    themeMode: String,
+    onThemeChange: (String) -> Unit
+) {
     var editorOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<DavSource?>(null) }
     var showLog by remember { mutableStateOf(false) }
@@ -313,6 +328,10 @@ private fun SettingsTab(onOpenSource: (DavSource) -> Unit, onOpenPrivacy: () -> 
             },
             onDelete = { SourceStore.remove(it.id) },
             onOpenSettings = onOpenPrivacy,
+            headerContent = {
+                ThemeModeCard(themeMode, onThemeChange)
+                Spacer(Modifier.height(18.dp))
+            },
             footer = {
                 Column {
                     KomgaSettingsCard()
@@ -320,6 +339,49 @@ private fun SettingsTab(onOpenSource: (DavSource) -> Unit, onOpenPrivacy: () -> 
                     LogCard(onView = { showLog = true })
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun ThemeModeCard(themeMode: String, onChange: (String) -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(SurfaceBg, RoundedCornerShape(12.dp))
+            .padding(14.dp)
+    ) {
+        Text("外观主题", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextMain)
+        Spacer(Modifier.height(3.dp))
+        Text("默认跟随系统，也可以手动固定浅色或深色", fontSize = 11.sp, color = Muted)
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ThemeChoice("跟随系统", "system", themeMode, onChange)
+            ThemeChoice("浅色", "light", themeMode, onChange)
+            ThemeChoice("深色", "dark", themeMode, onChange)
+        }
+    }
+}
+
+@Composable
+private fun ThemeChoice(
+    label: String,
+    value: String,
+    selectedValue: String,
+    onChange: (String) -> Unit
+) {
+    val selected = selectedValue == value
+    Box(
+        Modifier
+            .background(if (selected) Brand else SurfaceHigh, RoundedCornerShape(50))
+            .clickable { onChange(value) }
+            .padding(horizontal = 12.dp, vertical = 7.dp)
+    ) {
+        Text(
+            label,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) Color.White else Muted
         )
     }
 }

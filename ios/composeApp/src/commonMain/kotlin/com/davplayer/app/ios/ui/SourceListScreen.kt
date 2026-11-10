@@ -62,6 +62,7 @@ fun SourceListScreen(
     onEdit: (DavSource) -> Unit,
     onDelete: (DavSource) -> Unit,
     onOpenSettings: () -> Unit,
+    headerContent: @Composable () -> Unit = {},
     footer: @Composable () -> Unit = {}
 ) {
     var pendingDelete by remember { mutableStateOf<DavSource?>(null) }
@@ -84,6 +85,9 @@ fun SourceListScreen(
                     }
                     TextButton(onClick = onOpenSettings) { Text("设置", fontSize = 12.sp, color = Muted) }
                 }
+
+                Spacer(Modifier.height(18.dp))
+                headerContent()
 
                 if (history.isNotEmpty()) {
                     Spacer(Modifier.height(26.dp))

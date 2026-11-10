@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -27,27 +26,50 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Subtitles
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
+import okhttp3.OkHttpClient
 import java.net.URLDecoder
+import kotlinx.coroutines.delay
 
+@OptIn(UnstableApi::class)
 class VideoDetailActivity : ComponentActivity() {
     companion object {
         const val EXTRA_HREF = "href"
@@ -60,36 +82,94 @@ class VideoDetailActivity : ComponentActivity() {
         const val EXTRA_LAST_MODIFIED = "last_modified"
     }
 
+    private var player: ExoPlayer? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val href = intent.getStringExtra(EXTRA_HREF) ?: run { finish(); return }
         val title = intent.getStringExtra(EXTRA_TITLE) ?: href.substringAfterLast('/')
-        val position = intent.getLongExtra(EXTRA_POSITION, 0L)
+        val startPosition = intent.getLongExtra(EXTRA_POSITION, 0L)
         val subtitleHref = intent.getStringExtra(EXTRA_SUBTITLE_HREF)
         val subtitleName = intent.getStringExtra(EXTRA_SUBTITLE_NAME)
         val subtitleSize = intent.getLongExtra(EXTRA_SUBTITLE_SIZE, 0L)
         val size = intent.getLongExtra(EXTRA_SIZE, 0L)
         val lastModified = intent.getLongExtra(EXTRA_LAST_MODIFIED, 0L)
         val settings = Settings(this)
+        val source = settings.activeSource()
+        val unsupported = isUnsupportedVideo(title.ifBlank { href })
+
+        val exo = if (source == null || unsupported) null else runCatching {
+            val client = WebDavClient(source.url, source.user, source.pass)
+            val headers = client.authHeaders()
+            val dataSource = OkHttpDataSource.Factory(
+                OkHttpClient.Builder().addInterceptor(HttpLogInterceptor()).build()
+            ).setDefaultRequestProperties(headers)
+            val subConfig = subtitleHref?.let {
+                MediaItem.SubtitleConfiguration.Builder(
+                    android.net.Uri.parse(client.fileUrl(it))
+                )
+                    .setMimeType(subtitleMime(it))
+                    .setLanguage("und")
+                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                    .build()
+            }
+            val item = MediaItem.Builder()
+                .setUri(client.fileUrl(href))
+                .apply { if (subConfig != null) setSubtitleConfigurations(listOf(subConfig)) }
+                .build()
+            ExoPlayer.Builder(this)
+                .setLoadControl(
+                    DefaultLoadControl.Builder()
+                        .setBufferDurationsMs(10_000, 45_000, 1_500, 3_000)
+                        .build()
+                )
+                .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
+                .build()
+                .apply {
+                    setMediaItem(item)
+                    prepare()
+                    if (startPosition > 0) seekTo(startPosition)
+                    playWhenReady = true
+                }
+        }.getOrNull()
+        player = exo
 
         setContent {
             DavThemeProvider(dark = resolveDark(settings.themeMode)) {
                 VideoDetailScreen(
                     title = title,
                     href = href,
-                    positionMs = position,
                     size = size,
                     lastModified = lastModified,
                     subtitleHref = subtitleHref,
                     subtitleName = subtitleName,
                     subtitleSize = subtitleSize,
+                    player = exo,
+                    error = when {
+                        source == null -> "没有可用的 WebDAV 源"
+                        unsupported -> unsupportedMessage(title.ifBlank { href })
+                        exo == null -> "播放器初始化失败"
+                        else -> null
+                    },
                     onBack = { finish() },
-                    onPlay = {
+                    onFullscreen = { position ->
+                        player?.pause()
                         startPlayer(this, href, title, position, subtitleHref)
                     }
                 )
             }
         }
+    }
+
+    override fun onPause() {
+        player?.pause()
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        player?.release()
+        player = null
+        super.onDestroy()
     }
 }
 
@@ -97,14 +177,15 @@ class VideoDetailActivity : ComponentActivity() {
 private fun VideoDetailScreen(
     title: String,
     href: String,
-    positionMs: Long,
     size: Long,
     lastModified: Long,
     subtitleHref: String?,
     subtitleName: String?,
     subtitleSize: Long,
+    player: ExoPlayer?,
+    error: String?,
     onBack: () -> Unit,
-    onPlay: () -> Unit
+    onFullscreen: (Long) -> Unit
 ) {
     val extra = davExtra()
     val meta = parseVideoMeta(title)
@@ -135,54 +216,24 @@ private fun VideoDetailScreen(
                 .padding(horizontal = 16.dp)
                 .navigationBarsPadding()
         ) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFF111827), Color(0xFF25314C))
-                        )
-                    )
-                    .clickable(onClick = onPlay),
-                contentAlignment = Alignment.Center
-            ) {
-                meta.labels.firstOrNull()?.let { label ->
-                    Surface(
-                        modifier = Modifier.align(Alignment.TopStart).padding(12.dp),
-                        color = Color.Black.copy(alpha = 0.42f),
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Text(
-                            label,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+            if (player != null && error == null) {
+                InlineVideoPlayer(player = player, onFullscreen = onFullscreen)
+            } else {
                 Box(
                     Modifier
-                        .size(58.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.92f)),
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Brush.linearGradient(listOf(Color(0xFF111827), Color(0xFF25314C)))),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Default.PlayArrow, "播放",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(34.dp)
+                    Text(
+                        error ?: "无法播放",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(24.dp)
                     )
                 }
-                Text(
-                    if (positionMs > 0) "继续播放 · ${formatMs(positionMs)}" else "点击播放",
-                    modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
-                    color = Color.White.copy(alpha = 0.9f),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
-                )
             }
 
             Spacer(Modifier.height(16.dp))
@@ -270,24 +321,135 @@ private fun VideoDetailScreen(
                 }
             }
 
-            Spacer(Modifier.height(18.dp))
-            Button(
-                onClick = onPlay,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(if (positionMs > 0) "继续播放" else "开始播放", fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
             Text(
-                "播放页单击画面显示控制栏，双击画面切换横屏 / 竖屏全屏。",
+                "单击播放器控制栏显示播放进度，点右下角全屏按钮进入横屏播放。",
                 modifier = Modifier.fillMaxWidth(),
                 fontSize = 10.sp,
-                color = davExtra().textMuted
+                color = extra.textMuted
             )
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@OptIn(UnstableApi::class)
+@Composable
+private fun InlineVideoPlayer(
+    player: ExoPlayer,
+    onFullscreen: (Long) -> Unit
+) {
+    val ctx = LocalContext.current
+    var playing by remember { mutableStateOf(player.isPlaying) }
+    var position by remember { mutableLongStateOf(player.currentPosition.coerceAtLeast(0)) }
+    var duration by remember { mutableLongStateOf(player.duration.coerceAtLeast(0)) }
+    var dragValue by remember { mutableStateOf<Float?>(null) }
+
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                playing = isPlaying
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                duration = player.duration.coerceAtLeast(0)
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                playing = false
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+
+    LaunchedEffect(player) {
+        while (true) {
+            position = player.currentPosition.coerceAtLeast(0)
+            duration = player.duration.coerceAtLeast(0)
+            delay(500)
+        }
+    }
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(16f / 9f)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.Black)
+    ) {
+        androidx.compose.ui.viewinterop.AndroidView(
+            factory = {
+                PlayerView(it).apply {
+                    this.player = player
+                    useController = false
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        Box(
+            Modifier
+                .align(Alignment.Center)
+                .size(54.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.48f))
+                .clickable {
+                    if (player.isPlaying) player.pause() else player.play()
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                if (playing) "暂停" else "播放",
+                tint = Color.White,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.82f))
+                    )
+                )
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            val dur = duration.coerceAtLeast(1L)
+            Slider(
+                value = dragValue ?: position.toFloat().coerceIn(0f, dur.toFloat()),
+                valueRange = 0f..dur.toFloat(),
+                onValueChange = { dragValue = it },
+                onValueChangeFinished = {
+                    dragValue?.let { player.seekTo(it.toLong()) }
+                    dragValue = null
+                },
+                modifier = Modifier.fillMaxWidth().height(24.dp)
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${formatMs(dragValue?.toLong() ?: position)} / ${formatMs(duration)}",
+                    color = Color.White.copy(alpha = 0.86f),
+                    fontSize = 10.sp
+                )
+                Spacer(Modifier.weight(1f))
+                IconButton(
+                    onClick = { onFullscreen(player.currentPosition.coerceAtLeast(0)) },
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Fullscreen, "横屏全屏",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
         }
     }
 }

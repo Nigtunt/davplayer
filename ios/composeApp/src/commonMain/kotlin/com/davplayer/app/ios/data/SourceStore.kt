@@ -47,6 +47,18 @@ object SourceStore {
     var history: List<PlayProgress> by mutableStateOf(loadHistory())
         private set
 
+    /** system | light | dark */
+    var themeMode: String by mutableStateOf(
+        readSetting("themeMode")?.takeIf { it in setOf("system", "light", "dark") } ?: "system"
+    )
+        private set
+
+    fun updateThemeMode(mode: String) {
+        if (mode !in setOf("system", "light", "dark")) return
+        themeMode = mode
+        writeSetting("themeMode", mode)
+    }
+
     fun newId(): String = Random.nextLong().toString()
 
     fun sourceById(id: String): DavSource? = sources.firstOrNull { it.id == id }
