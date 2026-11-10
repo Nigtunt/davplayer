@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -63,9 +64,22 @@ import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
 import coil.compose.LocalImageLoader
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -88,11 +102,18 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     Settings("我的", Icons.Default.Settings)
 }
 
-fun startPlayer(ctx: Context, href: String, title: String, positionMs: Long = 0L) {
+fun startPlayer(
+    ctx: Context,
+    href: String,
+    title: String,
+    positionMs: Long = 0L,
+    subtitleHref: String? = null
+) {
     ctx.startActivity(Intent(ctx, PlayerActivity::class.java).apply {
         putExtra(PlayerActivity.EXTRA_HREF, href)
         putExtra(PlayerActivity.EXTRA_TITLE, title)
         putExtra(PlayerActivity.EXTRA_POSITION, positionMs)
+        putExtra(PlayerActivity.EXTRA_SUBTITLE_HREF, subtitleHref)
     })
 }
 
@@ -230,22 +251,20 @@ fun App() {
     }
 }
 
-/** 底部导航：细描边分隔 + 图标/文字双行，选中加粗加深 */
+/** 底部导航：无硬分割线，白色浮层 + 选中主色胶囊 */
 @Composable
 private fun PulseBottomBar(tab: Tab, onSelect: (Tab) -> Unit) {
     val extra = davExtra()
-    Column {
-        HorizontalDivider(color = extra.hairline, thickness = 1.dp)
+    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
                 .navigationBarsPadding()
-                .height(56.dp)
+                .height(60.dp)
         ) {
             Tab.entries.forEach { t ->
                 val selected = tab == t
-                val color = if (selected) MaterialTheme.colorScheme.onSurface else extra.textMuted
+                val color = if (selected) MaterialTheme.colorScheme.primary else extra.textMuted
                 Column(
                     Modifier
                         .weight(1f)
@@ -254,8 +273,18 @@ private fun PulseBottomBar(tab: Tab, onSelect: (Tab) -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(t.icon, t.label, tint = color, modifier = Modifier.size(21.dp))
-                    Spacer(Modifier.height(2.dp))
+                    Box(
+                        Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                                else Color.Transparent
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(t.icon, t.label, tint = color, modifier = Modifier.size(19.dp))
+                    }
                     Text(
                         t.label,
                         fontSize = 10.sp,
@@ -268,27 +297,42 @@ private fun PulseBottomBar(tab: Tab, onSelect: (Tab) -> Unit) {
     }
 }
 
-/** YouTube 风格胶囊筛选：8dp 微方圆角，选中反色 */
+/** 筛选胶囊：白底细描边，选中主色 */
 @Composable
 fun PulseChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val extra = davExtra()
     Box(
         Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) extra.pillActiveBg else extra.pill)
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) MaterialTheme.colorScheme.primary else extra.pill)
+            .border(1.dp, if (selected) Color.Transparent else extra.hairline, RoundedCornerShape(50))
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
         Text(
             label,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = if (selected) extra.pillActiveText else MaterialTheme.colorScheme.onSurface
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
 
 // ==================== 浏览 ====================
+
+private enum class BrowseFilter(val label: String) {
+    All("全部"), Folder("文件夹"), Video("视频"), Subtitle("字幕")
+}
+
+private enum class BrowseSort(val label: String) {
+    Name("名称"), Size("大小"), Modified("时间")
+}
+
+private fun sortDavEntries(list: List<DavEntry>, mode: String): List<DavEntry> = when {
+    mode.equals(BrowseSort.Size.name, true) -> list.sortedByDescending { it.size }
+    mode.equals(BrowseSort.Modified.name, true) -> list.sortedByDescending { it.lastModified }
+    else -> list.sortedBy { it.name.lowercase() }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -301,7 +345,6 @@ fun BrowseScreen(
 ) {
     val ctx = LocalContext.current
     val historyStore = remember { HistoryStore(ctx) }
-    val extra = davExtra()
 
     val sources = remember(sourcesVersion) { settings.getSources() }
     var activeId by remember(sourcesVersion) { mutableStateOf(settings.activeSource()?.id) }
@@ -337,14 +380,19 @@ fun BrowseScreen(
     var error by remember(path) { mutableStateOf<String?>(null) }
     var loading by remember(path) { mutableStateOf(listCache[path] == null) }
     var refreshTick by remember(source.id) { mutableStateOf(0) }
-    var sourceMenuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    // 文件操作：右滑显示删除/移动，移动目标目录会记住上次位置
+    // 文件操作：左滑显示删除/移动，移动目标目录会记住上次位置
     var deleteTarget by remember { mutableStateOf<DavEntry?>(null) }
     var moveTarget by remember { mutableStateOf<DavEntry?>(null) }
     var actionBusy by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
+    var actionTarget by remember { mutableStateOf<DavEntry?>(null) }
+    var infoTarget by remember { mutableStateOf<DavEntry?>(null) }
+    var filter by remember { mutableStateOf(BrowseFilter.All) }
+    var gridView by remember { mutableStateOf(settings.browseGridView) }
+    var sortMode by remember { mutableStateOf(settings.browseSortMode) }
+    val clipboard = LocalClipboardManager.current
 
     // 每个目录一份独立的滚动状态：进入子目录再返回上级，自动回到离开时的位置
     val listState = listStates.getOrPut(path) { LazyListState() }
@@ -400,63 +448,71 @@ fun BrowseScreen(
         if (stack.size > 1) stack.removeAt(stack.size - 1)
     }
 
-    Column(Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = {
-                Text(
-                    decodeName(path).ifBlank { source.name },
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = (-0.5).sp
-                    )
-                )
+    val allSupported = entries.orEmpty()
+        .filter { it.isDir || isVideoFile(it.name) || isSubtitleFile(it.name) }
+    val sortedFiles = sortDavEntries(allSupported.filterNot { it.isDir }, sortMode)
+    val folders = sortDavEntries(allSupported.filter { it.isDir }, "name")
+    val videos = sortedFiles.filter { isVideoFile(it.name) }
+    val subtitles = sortedFiles.filter { isSubtitleFile(it.name) }
+    val counts = mapOf(
+        BrowseFilter.All to allSupported.size,
+        BrowseFilter.Folder to folders.size,
+        BrowseFilter.Video to videos.size,
+        BrowseFilter.Subtitle to subtitles.size
+    )
+    val filesForFilter = when (filter) {
+        BrowseFilter.Folder -> emptyList()
+        BrowseFilter.Video -> videos
+        BrowseFilter.Subtitle -> subtitles
+        BrowseFilter.All -> sortedFiles
+    }
+    val status = when {
+        loading -> "加载中" to Color(0xFFD97706)
+        error != null -> "未连接" to Color(0xFFDC2626)
+        else -> "已连接" to Color(0xFF16A34A)
+    }
+    val sortEnum = BrowseSort.entries.firstOrNull { it.name.equals(sortMode, true) } ?: BrowseSort.Name
+    val openFolder: (DavEntry) -> Unit = { folder ->
+        stack.add(if (folder.href.endsWith("/")) folder.href else folder.href + "/")
+    }
+
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        ModernBrowseHeader(
+            sourceName = source.name,
+            sources = sources,
+            onSwitchSource = { s ->
+                settings.activeSourceId = s.id
+                activeId = s.id
             },
-            navigationIcon = {
-                // 回上级目录
-                IconButton(
-                    onClick = { if (stack.size > 1) stack.removeAt(stack.size - 1) },
-                    enabled = stack.size > 1
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "上级目录")
-                }
-            },
-            actions = {
-                // 回主目录
-                IconButton(
-                    onClick = {
-                        while (stack.size > 1) stack.removeAt(stack.size - 1)
-                    },
-                    enabled = stack.size > 1
-                ) {
-                    Icon(Icons.Default.Home, "主目录")
-                }
-                // 切换源
-                Box {
-                    TextButton(onClick = { sourceMenuOpen = true }) {
-                        Text(source.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Icon(Icons.Default.ArrowDropDown, null)
-                    }
-                    DropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
-                        sources.forEach { s ->
-                            DropdownMenuItem(
-                                text = { Text(if (s.id == source.id) "✓ ${s.name}" else s.name) },
-                                onClick = {
-                                    settings.activeSourceId = s.id
-                                    activeId = s.id
-                                    sourceMenuOpen = false
-                                }
-                            )
-                        }
-                    }
-                }
-                IconButton(onClick = { listCache.remove(path); refreshTick++ }) {
-                    Icon(Icons.Default.Refresh, "刷新")
+            crumbs = davBreadcrumbs(client.rootPath, path),
+            onCrumb = { crumb ->
+                val chain = buildPathChain(client.rootPath, crumb.path)
+                if (chain != stack.toList()) {
+                    stack.clear()
+                    stack.addAll(chain)
                 }
             },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+            canBack = stack.size > 1,
+            onBack = { if (stack.size > 1) stack.removeAt(stack.size - 1) },
+            filter = filter,
+            onFilter = { filter = it },
+            counts = counts,
+            gridView = gridView,
+            onToggleView = {
+                gridView = !gridView
+                settings.browseGridView = gridView
+            },
+            sortLabel = sortEnum.label,
+            onSort = {
+                val next = BrowseSort.entries[(sortEnum.ordinal + 1) % BrowseSort.entries.size]
+                sortMode = next.name
+                settings.browseSortMode = next.name
+                Toast.makeText(ctx, "排序：${next.label}", Toast.LENGTH_SHORT).show()
+            },
+            onRefresh = { listCache.remove(path); refreshTick++ },
+            statusText = status.first,
+            statusColor = status.second
         )
-        HorizontalDivider(color = extra.hairline, thickness = 1.dp)
 
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -464,36 +520,98 @@ fun BrowseScreen(
             }
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("加载失败：$error", color = MaterialTheme.colorScheme.error)
+                    Text("加载失败：$error", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
                     Spacer(Modifier.height(12.dp))
                     Button(onClick = { refreshTick++ }) { Text("重试") }
                 }
             }
-            entries.isNullOrEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("空目录", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            allSupported.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("空目录", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            }
+            folders.isEmpty() && filesForFilter.isEmpty() -> Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("没有匹配内容", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
             }
             else -> {
-                val visible = entries!!.filter { it.isDir || isVideoFile(it.name) }
-                LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                    items(visible, key = { it.href }) { entry ->
-                        SwipeableBrowseRow(
-                            entry = entry,
-                            history = historyMap[entry.href],
-                            historyStore = historyStore,
-                            resumeTick = resumeTick,
-                            onClick = {
-                                if (entry.isDir) {
-                                    stack.add(if (entry.href.endsWith("/")) entry.href else entry.href + "/")
-                                } else {
-                                    scope.launch {
-                                        val pos = HistoryStore(ctx).get(entry.href)?.positionMs ?: 0L
-                                        startPlayer(ctx, entry.href, entry.name, pos)
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    state = listState,
+                    contentPadding = PaddingValues(bottom = 24.dp)
+                ) {
+                    if (filter == BrowseFilter.All || filter == BrowseFilter.Folder) {
+                        item {
+                            BrowseSectionTitle(
+                                title = "文件夹",
+                                count = folders.size,
+                                trailing = if (filter == BrowseFilter.Folder) "名称" else null
+                            )
+                        }
+                        if (gridView) {
+                            items(folders.chunked(2), key = { row -> row.joinToString("|") { it.href } }) { row ->
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    row.forEach { folder ->
+                                        FolderGridCard(
+                                            entry = folder,
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { openFolder(folder) },
+                                            onMore = { actionTarget = folder }
+                                        )
                                     }
+                                    if (row.size == 1) Spacer(Modifier.weight(1f))
                                 }
-                            },
-                            onDelete = { deleteTarget = entry },
-                            onMove = { moveTarget = entry }
-                        )
+                            }
+                        } else {
+                            items(folders, key = { it.href }) { folder ->
+                                FolderListCard(
+                                    entry = folder,
+                                    onClick = { openFolder(folder) },
+                                    onMore = { actionTarget = folder }
+                                )
+                            }
+                        }
+                    }
+
+                    if (filter != BrowseFilter.Folder && filesForFilter.isNotEmpty()) {
+                        item {
+                            BrowseSectionTitle(
+                                title = when (filter) {
+                                    BrowseFilter.Video -> "视频"
+                                    BrowseFilter.Subtitle -> "字幕"
+                                    else -> "文件"
+                                },
+                                count = filesForFilter.size
+                            )
+                        }
+                        items(filesForFilter, key = { it.href }) { entry ->
+                            SwipeableBrowseRow(
+                                entry = entry,
+                                history = historyMap[entry.href],
+                                historyStore = historyStore,
+                                resumeTick = resumeTick,
+                                onClick = {
+                                    if (isVideoFile(entry.name)) {
+                                        scope.launch {
+                                            val pos = HistoryStore(ctx).get(entry.href)?.positionMs ?: 0L
+                                            val base = entry.name.substringBeforeLast('.').lowercase()
+                                            val subtitle = subtitles.firstOrNull {
+                                                it.name.substringBeforeLast('.').lowercase() == base
+                                            }
+                                            startPlayer(ctx, entry.href, entry.name, pos, subtitle?.href)
+                                        }
+                                    } else {
+                                        actionTarget = entry
+                                    }
+                                },
+                                onMore = { actionTarget = entry },
+                                onDelete = { deleteTarget = entry },
+                                onMove = { moveTarget = entry }
+                            )
+                        }
                     }
                 }
             }
@@ -573,60 +691,432 @@ fun BrowseScreen(
             confirmButton = { TextButton(onClick = { actionError = null }) { Text("好") } }
         )
     }
+
+    actionTarget?.let { target ->
+        ModalBottomSheet(onDismissRequest = { actionTarget = null }) {
+            Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 24.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            when {
+                                target.isDir -> Icons.Default.Folder
+                                isSubtitleFile(target.name) -> Icons.Default.Subtitles
+                                else -> Icons.Default.PlayArrow
+                            },
+                            null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            target.name,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            buildString {
+                                if (target.isDir) append("文件夹")
+                                else if (isSubtitleFile(target.name)) append("字幕")
+                                else append("视频")
+                                if (!target.isDir && target.size > 0) append(" · ${formatSize(target.size)}")
+                            },
+                            fontSize = 10.sp,
+                            color = davExtra().textMuted
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                if (target.isDir) {
+                    SheetActionRow(Icons.Default.Folder, "打开") {
+                        actionTarget = null
+                        openFolder(target)
+                    }
+                } else if (isVideoFile(target.name)) {
+                    SheetActionRow(Icons.Default.PlayArrow, "播放", MaterialTheme.colorScheme.primary) {
+                        actionTarget = null
+                        scope.launch {
+                            val pos = historyStore.get(target.href)?.positionMs ?: 0L
+                            startPlayer(ctx, target.href, target.name, pos)
+                        }
+                    }
+                }
+                SheetActionRow(Icons.Default.ContentCopy, "复制直链") {
+                    clipboard.setText(AnnotatedString(client.fileUrl(target.href)))
+                    Toast.makeText(ctx, "已复制直链", Toast.LENGTH_SHORT).show()
+                    actionTarget = null
+                }
+                SheetActionRow(Icons.Default.Info, "文件信息") {
+                    actionTarget = null
+                    infoTarget = target
+                }
+                if (!target.isDir) {
+                    SheetActionRow(Icons.Default.Edit, "移动") {
+                        actionTarget = null
+                        moveTarget = target
+                    }
+                    SheetActionRow(Icons.Default.Delete, "删除", MaterialTheme.colorScheme.error) {
+                        actionTarget = null
+                        deleteTarget = target
+                    }
+                }
+            }
+        }
+    }
+
+    infoTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { infoTarget = null },
+            title = { Text("文件信息") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    InfoLine("名称", target.name)
+                    InfoLine("路径", target.href)
+                    InfoLine(
+                        "类型",
+                        when {
+                            target.isDir -> "文件夹"
+                            isSubtitleFile(target.name) -> "字幕"
+                            else -> "视频"
+                        }
+                    )
+                    if (!target.isDir) InfoLine("大小", formatSize(target.size))
+                    formatDavModified(target.lastModified)?.let { InfoLine("修改时间", it) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { infoTarget = null }) { Text("关闭") } }
+        )
+    }
 }
 
-/** 紧凑小图列表行：左侧 16:9 缩略图（角标 + 进度条）+ 右侧高密度信息 */
+@Composable
+private fun SheetActionRow(
+    icon: ImageVector,
+    label: String,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, tint = color, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = color)
+    }
+}
+
+@Composable
+private fun InfoLine(label: String, value: String) {
+    Row(Modifier.fillMaxWidth()) {
+        Text(
+            label,
+            fontSize = 11.sp,
+            color = davExtra().textMuted,
+            modifier = Modifier.width(56.dp)
+        )
+        Text(value, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
+private fun ModernBrowseHeader(
+    sourceName: String,
+    sources: List<DavSource>,
+    onSwitchSource: (DavSource) -> Unit,
+    crumbs: List<DavBreadcrumb>,
+    onCrumb: (DavBreadcrumb) -> Unit,
+    canBack: Boolean,
+    onBack: () -> Unit,
+    filter: BrowseFilter,
+    onFilter: (BrowseFilter) -> Unit,
+    counts: Map<BrowseFilter, Int>,
+    gridView: Boolean,
+    onToggleView: () -> Unit,
+    sortLabel: String,
+    onSort: () -> Unit,
+    onRefresh: () -> Unit,
+    statusText: String,
+    statusColor: Color
+) {
+    var sourceMenuOpen by remember { mutableStateOf(false) }
+    val extra = davExtra()
+
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HeaderCircleButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                description = "上级目录",
+                enabled = canBack,
+                onClick = onBack
+            )
+            Spacer(Modifier.width(9.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(statusColor))
+                    Spacer(Modifier.width(5.dp))
+                    Box {
+                        Text(
+                            sourceName,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable { sourceMenuOpen = true }
+                        )
+                        DropdownMenu(
+                            expanded = sourceMenuOpen,
+                            onDismissRequest = { sourceMenuOpen = false }
+                        ) {
+                            sources.forEach { s ->
+                                DropdownMenuItem(
+                                    text = { Text(if (s.name == sourceName) "✓ ${s.name}" else s.name) },
+                                    onClick = {
+                                        sourceMenuOpen = false
+                                        onSwitchSource(s)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Text("  /  ", fontSize = 10.sp, color = extra.textMuted)
+                    Text(
+                        crumbs.lastOrNull()?.label ?: "根目录",
+                        fontSize = 10.sp,
+                        color = extra.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "媒体与文件库",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        letterSpacing = (-0.4).sp
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(statusColor.copy(alpha = 0.10f))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text(statusText, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = statusColor)
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                HeaderIconButton(
+                    icon = if (gridView) Icons.Default.ViewList else Icons.Default.GridView,
+                    description = if (gridView) "切换列表" else "切换图标",
+                    onClick = onToggleView
+                )
+                HeaderIconButton(
+                    icon = Icons.Default.Sort,
+                    description = "排序：$sortLabel",
+                    onClick = onSort
+                )
+                HeaderIconButton(
+                    icon = Icons.Default.Refresh,
+                    description = "刷新",
+                    onClick = onRefresh
+                )
+            }
+        }
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            crumbs.forEachIndexed { index, crumb ->
+                val active = index == crumbs.lastIndex
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(
+                            if (active) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surface
+                        )
+                        .clickable { onCrumb(crumb) }
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (index == 0) {
+                        Icon(
+                            Icons.Default.Home, null,
+                            tint = if (active) MaterialTheme.colorScheme.primary else extra.textMuted,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        crumb.label,
+                        fontSize = 10.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (active) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+                if (index < crumbs.lastIndex) {
+                    Text("›", fontSize = 11.sp, color = extra.textMuted)
+                }
+            }
+        }
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            BrowseFilter.entries.forEach { item ->
+                PulseChip("${item.label} ${counts[item] ?: 0}", filter == item) { onFilter(item) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeaderCircleButton(
+    icon: ImageVector,
+    description: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Box(
+        Modifier
+            .size(36.dp)
+            .shadow(2.dp, CircleShape, ambientColor = Color(0x0A101828))
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            icon, description,
+            tint = if (enabled) MaterialTheme.colorScheme.onSurface else davExtra().textMuted.copy(alpha = 0.4f),
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun HeaderIconButton(
+    icon: ImageVector,
+    description: String,
+    onClick: () -> Unit
+) {
+    HeaderCircleButton(icon, description, onClick = onClick)
+}
+
+@Composable
+private fun BrowseSectionTitle(
+    title: String,
+    count: Int,
+    trailing: String? = null
+) {
+    val extra = davExtra()
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.width(3.dp).height(14.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.primary))
+        Spacer(Modifier.width(7.dp))
+        Text(
+            title,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text("  $count", fontSize = 11.sp, color = extra.textMuted)
+        if (trailing != null) {
+            Spacer(Modifier.weight(1f))
+            Text(trailing, fontSize = 10.sp, color = extra.textMuted)
+        }
+    }
+}
+
+/** 视频/字幕文件卡片：白色微浮卡片，信息按标题、标签、进度分层 */
 @Composable
 private fun BrowseRow(
     entry: DavEntry,
     history: HistoryItem?,
     historyStore: HistoryStore,
     resumeTick: Int,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onMore: () -> Unit
 ) {
     val extra = davExtra()
+    val isSubtitle = isSubtitleFile(entry.name)
+    val meta = if (isVideoFile(entry.name)) parseVideoMeta(entry.name) else VideoMeta()
+    val unsupported = isVideoFile(entry.name) && isUnsupportedVideo(entry.name)
+
     Row(
         Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 5.dp)
+            .shadow(2.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x0A101828))
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        // 缩略图盒
         Box(
             Modifier
-                .size(132.dp, 74.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (entry.isDir) extra.pill else DavTheme.ThumbPlaceholder)
-                .border(1.dp, extra.hairline, RoundedCornerShape(10.dp)),
+                .size(if (isSubtitle) 56.dp else 116.dp, if (isSubtitle) 56.dp else 66.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    if (isSubtitle) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainer
+                ),
             contentAlignment = Alignment.Center
         ) {
-            if (entry.isDir) {
+            if (isSubtitle) {
                 Icon(
-                    Icons.Default.Folder, null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Icons.Default.Subtitles, null,
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(26.dp)
                 )
             } else {
                 FileCover(historyStore, entry.href, resumeTick, Modifier.fillMaxSize())
-                // 右下角大小角标
-                if (entry.size > 0) {
+                meta.labels.firstOrNull()?.let { label ->
                     Box(
                         Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(bottom = 8.dp, end = 5.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.82f))
-                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                            .align(Alignment.TopStart)
+                            .padding(5.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(Color.Black.copy(alpha = 0.62f))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
-                        Text(
-                            formatSize(entry.size),
-                            color = androidx.compose.ui.graphics.Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Text(label, color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-                // 底部观看进度
                 val progress = history?.progress ?: 0f
                 if (progress > 0f) {
                     Box(
@@ -634,7 +1124,7 @@ private fun BrowseRow(
                             .fillMaxWidth()
                             .height(3.dp)
                             .align(Alignment.BottomCenter)
-                            .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.25f))
+                            .background(Color.White.copy(alpha = 0.3f))
                     ) {
                         Box(
                             Modifier
@@ -646,59 +1136,191 @@ private fun BrowseRow(
                 }
             }
         }
+
         Spacer(Modifier.width(12.dp))
-        // 信息列
-        Column(
-            Modifier.weight(1f).heightIn(min = 74.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            ExpandableName(entry.name)
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (entry.isDir) {
-                    Text("文件夹", fontSize = 11.sp, color = extra.textMuted)
-                } else {
-                    val unsupported = isUnsupportedVideo(entry.name)
-                    // 格式标签
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(
-                                if (unsupported) MaterialTheme.colorScheme.error.copy(alpha = 0.16f)
-                                else extra.pill
-                            )
-                            .padding(horizontal = 5.dp)
-                    ) {
-                        Text(
-                            entry.name.substringAfterLast('.', "").uppercase().ifBlank { "视频" },
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (unsupported) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+
+        Column(Modifier.weight(1f).heightIn(min = if (isSubtitle) 56.dp else 66.dp)) {
+            Text(
+                entry.name,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(5.dp))
+
+            if (isSubtitle) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        entry.name.substringAfterLast('.', "").uppercase().ifBlank { "字幕" },
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        " · ${formatSize(entry.size)}",
+                        fontSize = 10.sp,
+                        color = extra.textMuted
+                    )
+                    formatDavModified(entry.lastModified)?.let {
+                        Text(" · $it", fontSize = 10.sp, color = extra.textMuted, maxLines = 1)
                     }
-                    if (unsupported) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "需外部播放器",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.error,
-                            maxLines = 1
-                        )
-                    } else {
-                        history?.let {
-                            Spacer(Modifier.width(6.dp))
+                }
+            } else {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    meta.labels.take(3).forEach { label ->
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        ) {
                             Text(
-                                "看到 ${formatMs(it.positionMs)}",
-                                fontSize = 11.sp,
-                                color = extra.textMuted,
-                                maxLines = 1
+                                label,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
+                    }
+                    if (unsupported) {
+                        Text("需外部播放器", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        formatSize(entry.size),
+                        fontSize = 10.sp,
+                        color = extra.textMuted
+                    )
+                    formatDavModified(entry.lastModified)?.let {
+                        Text("  ·  $it", fontSize = 10.sp, color = extra.textMuted, maxLines = 1)
+                    }
+                    history?.let {
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "看到 ${formatMs(it.positionMs)}",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = DavTheme.Coral,
+                            maxLines = 1
+                        )
                     }
                 }
             }
         }
+
+        IconButton(onClick = onMore, modifier = Modifier.size(30.dp)) {
+            Icon(
+                Icons.Default.MoreVert, "更多",
+                tint = extra.textMuted,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun FolderListCard(
+    entry: DavEntry,
+    onClick: () -> Unit,
+    onMore: () -> Unit
+) {
+    val extra = davExtra()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .shadow(2.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x0A101828))
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(42.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(23.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                entry.name,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                "文件夹${formatDavModified(entry.lastModified)?.let { " · $it" } ?: ""}",
+                fontSize = 10.sp,
+                color = extra.textMuted,
+                maxLines = 1
+            )
+        }
+        IconButton(onClick = onMore, modifier = Modifier.size(30.dp)) {
+            Icon(Icons.Default.MoreVert, "更多", tint = extra.textMuted, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+@Composable
+private fun FolderGridCard(
+    entry: DavEntry,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    onMore: () -> Unit
+) {
+    val extra = davExtra()
+    Column(
+        modifier
+            .shadow(2.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x0A101828))
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onClick)
+            .padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onMore, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.MoreVert, "更多", tint = extra.textMuted, modifier = Modifier.size(17.dp))
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            entry.name,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            formatDavModified(entry.lastModified) ?: "文件夹",
+            fontSize = 10.sp,
+            color = extra.textMuted,
+            maxLines = 1
+        )
     }
 }
 
@@ -709,11 +1331,12 @@ private fun SwipeableBrowseRow(
     historyStore: HistoryStore,
     resumeTick: Int,
     onClick: () -> Unit,
+    onMore: () -> Unit,
     onDelete: () -> Unit,
     onMove: () -> Unit
 ) {
     if (entry.isDir) {
-        BrowseRow(entry, history, historyStore, resumeTick, onClick)
+        BrowseRow(entry, history, historyStore, resumeTick, onClick, onMore)
         return
     }
 
@@ -777,7 +1400,8 @@ private fun SwipeableBrowseRow(
                 resumeTick = resumeTick,
                 onClick = {
                     if (dragOffset < -1f) settle(0f) else onClick()
-                }
+                },
+                onMore = onMore
             )
         }
     }
@@ -1065,16 +1689,40 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        // 胶囊筛选
-        Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            PulseChip("视频", seg == 0) { seg = 0 }
-            PulseChip("漫画", seg == 1) { seg = 1 }
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 6.dp)) {
+            Text(
+                "历史",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                letterSpacing = (-0.4).sp
+            )
+            Text(
+                "视频播放与漫画阅读记录",
+                fontSize = 10.sp,
+                color = extra.textMuted
+            )
         }
-        HorizontalDivider(color = extra.hairline, thickness = 1.dp)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+                .clip(RoundedCornerShape(50))
+                .background(extra.pill)
+                .padding(3.dp)
+        ) {
+            HistorySegment(
+                label = "视频 ${items.size}",
+                selected = seg == 0,
+                modifier = Modifier.weight(1f)
+            ) { seg = 0 }
+            HistorySegment(
+                label = comics?.let { "漫画 ${it.size}" } ?: "漫画",
+                selected = seg == 1,
+                modifier = Modifier.weight(1f)
+            ) { seg = 1 }
+        }
 
         if (seg == 0) {
             // ---------- 视频历史 ----------
@@ -1089,11 +1737,15 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
                         Row(
                             Modifier
                                 .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 5.dp)
+                                .shadow(2.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x0A101828))
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.surface)
                                 .combinedClickable(
                                     onClick = { startPlayer(ctx, item.href, item.title, item.positionMs) },
                                     onLongClick = { menuOpen = true }
                                 )
-                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                                .padding(10.dp)
                         ) {
                             Box(
                                 Modifier
@@ -1149,8 +1801,19 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
                                     color = extra.textMuted
                                 )
                             }
-                            IconButton(onClick = { store.remove(item.href); resumeTick++ }) {
-                                Icon(Icons.Default.Delete, "删除记录", tint = extra.textMuted, modifier = Modifier.size(20.dp))
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(MaterialTheme.colorScheme.primaryContainer)
+                                    .clickable { startPlayer(ctx, item.href, item.title, item.positionMs) }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    "继续",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
                             }
                         }
                         // 长按菜单：跳转到视频所在目录 / 删除记录
@@ -1215,10 +1878,14 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
                                 Row(
                                     Modifier
                                         .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 5.dp)
+                                        .shadow(2.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x0A101828))
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(MaterialTheme.colorScheme.surface)
                                         .clickable {
                                             startReader(ctx, item.id, item.title, item.readPage, item.seriesTitle)
                                         }
-                                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                                        .padding(10.dp)
                                 ) {
                                     Box(
                                         Modifier
@@ -1283,6 +1950,31 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
     }
 }
 
+@Composable
+private fun HistorySegment(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier
+            .height(34.dp)
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) MaterialTheme.colorScheme.surface else Color.Transparent)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
 // ==================== 设置 ====================
 
 /** 分组标签：小号全大写弱化文字 */
@@ -1298,18 +1990,76 @@ private fun GroupLabel(text: String) {
     )
 }
 
-/** 设置卡片：14dp 圆角 + 浅底 + 细描边 */
+/** 设置卡片：白色微浮卡片 + 细描边 */
 @Composable
 private fun SettingsBlock(content: @Composable ColumnScope.() -> Unit) {
     Surface(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 2.dp,
         border = BorderStroke(1.dp, davExtra().hairline)
     ) {
         Column(content = content)
+    }
+}
+
+@Composable
+private fun ProfileHeader(sourceName: String?, komgaConfigured: Boolean) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .shadow(3.dp, RoundedCornerShape(20.dp), ambientColor = Color(0x0A101828))
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(15.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF4F46E5), Color(0xFF818CF8)))),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("D", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("DavPlayer", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Text(
+                sourceName?.let { "WebDAV · $it" } ?: "还在配置媒体源",
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(
+                        if (sourceName != null) Color(0xFF16A34A).copy(alpha = 0.10f)
+                        else Color(0xFFD97706).copy(alpha = 0.10f)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    if (sourceName != null) "已连接" else "未配置",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (sourceName != null) Color(0xFF16A34A) else Color(0xFFD97706)
+                )
+            }
+            if (komgaConfigured) {
+                Spacer(Modifier.height(4.dp))
+                Text("Komga 已连接", fontSize = 9.sp, color = MaterialTheme.colorScheme.primary)
+            }
+        }
     }
 }
 
@@ -1376,6 +2126,13 @@ fun SettingsScreen(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 32.dp)
     ) {
+        item {
+            ProfileHeader(
+                sourceName = settings.activeSource()?.name,
+                komgaConfigured = settings.komgaUrl.isNotBlank()
+            )
+        }
+
         // ---------- 外观主题 ----------
         item { GroupLabel("外观 · 主题") }
         item {
@@ -1388,7 +2145,7 @@ fun SettingsScreen(
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("明暗主题", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                        Text("YouTube 邃黑与 Ins 纯白无缝切换", fontSize = 11.sp,
+                        Text("默认跟随系统，可手动切换浅色 / 深色", fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }

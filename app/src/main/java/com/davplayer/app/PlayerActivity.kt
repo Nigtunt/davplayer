@@ -82,6 +82,12 @@ val SUBTITLE_EXTS = setOf("srt", "ass", "ssa", "vtt")
 fun isSubtitleFile(name: String): Boolean =
     name.substringAfterLast('.', "").lowercase() in SUBTITLE_EXTS
 
+fun subtitleMime(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
+    "vtt" -> "text/vtt"
+    "ass", "ssa" -> "text/x-ssa"
+    else -> "application/x-subrip"
+}
+
 /** 持有播放器渲染画面引用，用于抽帧做封面 */
 class SurfaceRefs {
     var frame: AspectRatioFrameLayout? = null
@@ -94,6 +100,7 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_HREF = "href"
         const val EXTRA_TITLE = "title"
         const val EXTRA_POSITION = "pos"
+        const val EXTRA_SUBTITLE_HREF = "subtitle_href"
     }
 
     private var player: ExoPlayer? = null
@@ -111,6 +118,7 @@ class PlayerActivity : ComponentActivity() {
         val href = intent.getStringExtra(EXTRA_HREF) ?: run { finish(); return }
         val title = intent.getStringExtra(EXTRA_TITLE) ?: href.substringAfterLast('/')
         val startPos = intent.getLongExtra(EXTRA_POSITION, 0L)
+        val subtitleHref = intent.getStringExtra(EXTRA_SUBTITLE_HREF)
 
         val settings = Settings(this)
         val store = HistoryStore(this)
@@ -148,7 +156,25 @@ class PlayerActivity : ComponentActivity() {
             .build()
         player = exo
         if (!unsupported) {
-            exo.setMediaItem(MediaItem.fromUri(url))
+            // 浏览页已经找到同名外挂字幕；这里直接随视频一起挂载，播放器内不再做目录选择
+            val subtitleConfigs = subtitleHref?.let { subHref ->
+                listOf(
+                    MediaItem.SubtitleConfiguration.Builder(Uri.parse(client.fileUrl(subHref)))
+                        .setMimeType(subtitleMime(subHref))
+                        .setLanguage("und")
+                        .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                        .build()
+                )
+            }.orEmpty()
+            val item = if (subtitleConfigs.isEmpty()) {
+                MediaItem.fromUri(url)
+            } else {
+                MediaItem.Builder()
+                    .setUri(url)
+                    .setSubtitleConfigurations(subtitleConfigs)
+                    .build()
+            }
+            exo.setMediaItem(item)
             exo.prepare()
             if (startPos > 0) exo.seekTo(startPos)
             exo.playWhenReady = true
@@ -158,9 +184,7 @@ class PlayerActivity : ComponentActivity() {
             DavThemeProvider(dark = true) {
                 PlayerScreen(
                     player = exo,
-                    client = client,
                     videoHref = href,
-                    videoUrl = url,
                     title = title,
                     settings = settings,
                     surfaceRefs = surfaceRefs,
@@ -258,9 +282,7 @@ class PlayerActivity : ComponentActivity() {
 @Composable
 fun PlayerScreen(
     player: ExoPlayer,
-    client: WebDavClient,
     videoHref: String,
-    videoUrl: String,
     title: String,
     settings: Settings,
     surfaceRefs: SurfaceRefs,
@@ -285,14 +307,10 @@ fun PlayerScreen(
     val baseSpeed = remember { mutableStateOf(1f) }
     val speedPresets = remember { listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f) }
     val subtitleName = remember { mutableStateOf<String?>(null) }
-    val showSubtitlePicker = remember { mutableStateOf(false) }
 
     // Media3 的 TextRenderer 只负责解析字幕，画面必须由 SubtitleView 渲染（onCues 回调）
     var subtitleView by remember { mutableStateOf<SubtitleView?>(null) }
-    // 当前媒体里的文本轨（内嵌字幕），供字幕选择器列出
-    var textGroups by remember { mutableStateOf<List<Tracks.Group>>(emptyList()) }
     var autoSubtitleDone by remember { mutableStateOf(false) }
-    var preferLastTextTrack by remember { mutableStateOf(false) }
 
     var coverTried by remember { mutableStateOf(false) }
 
@@ -341,7 +359,6 @@ fun PlayerScreen(
 
             override fun onTracksChanged(tracks: Tracks) {
                 val groups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
-                textGroups = groups
                 logTrackInfo(tracks)
                 if (autoSubtitleDone || groups.isEmpty()) return
                 autoSubtitleDone = true
@@ -363,8 +380,7 @@ fun PlayerScreen(
                     )
                     return
                 }
-                val target = if (preferLastTextTrack) supported.last()
-                else supported.firstOrNull {
+                val target = supported.firstOrNull {
                     it.getTrackFormat(0).selectionFlags and C.SELECTION_FLAG_DEFAULT != 0
                 } ?: supported.first()
                 applyTextTrack(player, target)
@@ -655,10 +671,6 @@ fun PlayerScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                     Spacer(Modifier.weight(1f))
-                    // 字幕
-                    IconButton(onClick = { showSubtitlePicker.value = true }) {
-                        Icon(Icons.Default.Subtitles, "选择字幕", tint = Color.White)
-                    }
                     // 倍速胶囊
                     Surface(
                         onClick = {
@@ -735,62 +747,6 @@ fun PlayerScreen(
             }
         }
 
-        // 字幕选择对话框：内嵌字幕轨 + 外挂字幕文件（默认打开视频所在同级目录）
-        if (showSubtitlePicker.value) {
-            SubtitlePickerDialog(
-                client = client,
-                startDir = parentDirOf(videoHref),
-                embedded = textGroups,
-                subtitlesEnabled = textGroups.any { it.isSelected },
-                onDismiss = { showSubtitlePicker.value = false },
-                onDisableSubtitles = {
-                    showSubtitlePicker.value = false
-                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                        .build()
-                    subtitleName.value = null
-                },
-                onSelectEmbedded = { index ->
-                    val group = textGroups.getOrNull(index)
-                    if (group != null) {
-                        showSubtitlePicker.value = false
-                        applyTextTrack(player, group)
-                        subtitleName.value = subtitleLabel(group.getTrackFormat(0))
-                    }
-                },
-                onPick = { entry ->
-                    showSubtitlePicker.value = false
-                    subtitleName.value = entry.name
-                    val mime = when (entry.name.substringAfterLast('.', "").lowercase()) {
-                        "srt" -> "application/x-subrip"
-                        "vtt" -> "text/vtt"
-                        "ass", "ssa" -> "text/x-ssa"
-                        else -> "application/x-subrip"
-                    }
-                    val sub = MediaItem.SubtitleConfiguration.Builder(
-                        Uri.parse(client.fileUrl(entry.href))
-                    )
-                        .setMimeType(mime)
-                        .setLanguage("und")
-                        .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                        .build()
-                    val pos = player.currentPosition
-                    player.setMediaItem(
-                        MediaItem.Builder()
-                            .setUri(videoUrl)
-                            .setSubtitleConfigurations(listOf(sub))
-                            .build(),
-                        pos
-                    )
-                    // 外挂字幕轨会追加在末尾，重选后优先选它
-                    preferLastTextTrack = true
-                    autoSubtitleDone = false
-                    player.prepare()
-                    player.play()
-                }
-            )
-        }
     }
 }
 

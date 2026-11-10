@@ -99,6 +99,16 @@ class Settings(ctx: Context) {
         sp.edit().putString("lastMovePath.$sourceId", path).apply()
     }
 
+    /** 浏览页文件夹视图：列表 / 图标 */
+    var browseGridView: Boolean
+        get() = sp.getBoolean("browseGridView", false)
+        set(v) = sp.edit().putBoolean("browseGridView", v).apply()
+
+    /** name | size | modified */
+    var browseSortMode: String
+        get() = sp.getString("browseSortMode", "name") ?: "name"
+        set(v) = sp.edit().putString("browseSortMode", v).apply()
+
     /** 隐私模式：开启后启动显示计算器，输入暗码才进入应用；默认关闭 */
     var privacyMode: Boolean
         get() = sp.getBoolean("privacyMode", false)

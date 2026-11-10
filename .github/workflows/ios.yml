@@ -3,8 +3,7 @@ name: ios-ipa
 # iOS 技术验证包：只编译「未签名 ipa」，签名与安装交给 Windows 上的 iloader
 # 目标机 iPadOS 17.7.11 > 16.6.1，TrollStore 不可用
 on:
-  push:
-    branches: [ main ]
+  # Android 3.0 改造期间关闭自动 iOS 构建；iOS 改造完成后再恢复 push。
   workflow_dispatch:
 
 concurrency:

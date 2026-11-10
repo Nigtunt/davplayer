@@ -13,13 +13,16 @@ import java.io.IOException
 import java.io.StringReader
 import java.net.URI
 import java.net.URLDecoder
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 data class DavEntry(
     val name: String,
     val href: String,
     val isDir: Boolean,
-    val size: Long
+    val size: Long,
+    val lastModified: Long = 0L
 )
 
 val VIDEO_EXTS = setOf(
@@ -38,6 +41,36 @@ fun isVideoFile(name: String): Boolean =
 
 fun isUnsupportedVideo(name: String): Boolean =
     name.substringAfterLast('.', "").lowercase() in UNSUPPORTED_EXTS
+
+private val DAV_DATE_FORMATS = listOf(
+    "EEE, dd MMM yyyy HH:mm:ss zzz",
+    "EEE, dd MMM yyyy HH:mm:ss Z",
+    "yyyy-MM-dd'T'HH:mm:ss'Z'",
+    "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+    "yyyy-MM-dd HH:mm:ss"
+)
+
+fun parseDavTimestamp(raw: String): Long {
+    if (raw.isBlank()) return 0L
+    DAV_DATE_FORMATS.forEach { pattern ->
+        val value = runCatching {
+            SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }
+                .parse(raw)?.time
+        }.getOrNull()
+        if (value != null) return value
+    }
+    return 0L
+}
+
+fun formatDavModified(ms: Long): String? {
+    if (ms <= 0L) return null
+    val now = java.util.Calendar.getInstance()
+    val then = java.util.Calendar.getInstance().apply { timeInMillis = ms }
+    val sameDay = now.get(java.util.Calendar.YEAR) == then.get(java.util.Calendar.YEAR) &&
+        now.get(java.util.Calendar.DAY_OF_YEAR) == then.get(java.util.Calendar.DAY_OF_YEAR)
+    val pattern = if (sameDay) "'今天' HH:mm" else "MM-dd HH:mm"
+    return SimpleDateFormat(pattern, Locale.getDefault()).format(java.util.Date(ms))
+}
 
 /** 文件所在目录，保证以 / 结尾 */
 fun davParentPath(href: String): String {
@@ -114,6 +147,7 @@ class WebDavClient(baseUrl: String, username: String, password: String) {
         val xml = """<?xml version="1.0" encoding="utf-8" ?>""" +
                 """<D:propfind xmlns:D="DAV:"><D:prop>""" +
                 """<D:displayname/><D:resourcetype/><D:getcontentlength/>""" +
+                """<D:getlastmodified/>""" +
                 """</D:prop></D:propfind>"""
         val reqBuilder = Request.Builder()
             .url(fileUrl(path))
@@ -137,6 +171,7 @@ class WebDavClient(baseUrl: String, username: String, password: String) {
         var href = StringBuilder()
         var name = StringBuilder()
         var size = StringBuilder()
+        var modified = StringBuilder()
         var isDir = false
         var tag = ""
         var event = parser.eventType
@@ -147,7 +182,7 @@ class WebDavClient(baseUrl: String, username: String, password: String) {
                     when (tag) {
                         "response" -> {
                             href = StringBuilder(); name = StringBuilder()
-                            size = StringBuilder(); isDir = false
+                            size = StringBuilder(); modified = StringBuilder(); isDir = false
                         }
                         "collection" -> isDir = true
                     }
@@ -156,6 +191,7 @@ class WebDavClient(baseUrl: String, username: String, password: String) {
                     "href" -> href.append(parser.text)
                     "displayname" -> name.append(parser.text)
                     "getcontentlength" -> size.append(parser.text)
+                    "getlastmodified" -> modified.append(parser.text)
                 }
                 XmlPullParser.END_TAG -> {
                     if (parser.name.substringAfter(':') == "response") {
@@ -174,7 +210,8 @@ class WebDavClient(baseUrl: String, username: String, password: String) {
                                     // 部分服务端（AList 某些存储）不返回 <collection/>，
                                     // 目录 href 一定以 "/" 结尾，用这个兜底
                                     isDir = isDir || h.endsWith("/"),
-                                    size = size.toString().trim().toLongOrNull() ?: 0L
+                                    size = size.toString().trim().toLongOrNull() ?: 0L,
+                                    lastModified = parseDavTimestamp(modified.toString().trim())
                                 )
                             )
                         }

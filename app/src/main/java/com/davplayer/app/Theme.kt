@@ -11,60 +11,63 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
 /**
- * PulseStream 风格双主题设计令牌：
- * - 深色：YouTube 邃黑 (#0F0F0F) + 珊瑚霓虹红点缀
- * - 浅色：Ins 纯净白 (#FFFFFF) + 同系红色点缀
- * - 品牌渐变：#FF0050 → #FF5B2E → #FF00A0
+ * DavPlayer 3.0 设计令牌：
+ * - 浅色优先：暖灰画布 + 纯白卡片 + 靛蓝主色
+ * - 珊瑚红只用于播放/阅读进度
+ * - 深色保留同层级关系，不简单反相
  */
 object DavTheme {
-    val Accent = Color(0xFFFF0050)
-    val AccentOrange = Color(0xFFFF5B2E)
-    val AccentPink = Color(0xFFFF00A0)
-    val LiveRed = Color(0xFFFF0033)
-    val VerifiedBlue = Color(0xFF3EA6FF)
+    val Accent = Color(0xFF4F46E5)
+    val AccentOrange = Color(0xFFFF7A45)
+    val AccentPink = Color(0xFFFF4D4F)
+    val LiveRed = Color(0xFFFF4D4F)
+    val VerifiedBlue = Color(0xFF3D8BFF)
+    val Coral = Color(0xFFFF4D4F)
+    val IndigoSoft = Color(0xFFEEF2FF)
 
+    /** 进度/品牌渐变：珊瑚红，不再用粉紫渐变 */
     val BrandGradient: Brush =
-        Brush.linearGradient(listOf(Accent, AccentOrange, AccentPink))
+        Brush.linearGradient(listOf(AccentPink, AccentOrange))
 
-    /** 缩略图占位底色（双主题通用） */
+    /** 缩略图无图时的深色底（真实封面加载前使用） */
     val ThumbPlaceholder = Color(0xFF1E1E24)
 
     val DarkColors = darkColorScheme(
-        primary = Accent,
-        onPrimary = Color(0xFFFFFFFF),
-        primaryContainer = Color(0xFF4A0A20),
-        onPrimaryContainer = Color(0xFFFFD9E2),
-        secondary = Color(0xFFAAAAAA),
-        onSecondary = Color(0xFF0F0F0F),
-        background = Color(0xFF0F0F0F),
-        onBackground = Color(0xFFF1F1F1),
-        surface = Color(0xFF0F0F0F),
-        onSurface = Color(0xFFF1F1F1),
-        surfaceVariant = Color(0xFF1A1A1A),          // bg-elevated
-        onSurfaceVariant = Color(0xFFAAAAAA),
-        outline = Color(0x14FFFFFF),                 // 8% 白描边
+        primary = Color(0xFFA5B4FC),
+        onPrimary = Color(0xFF11162A),
+        primaryContainer = Color(0xFF2B3260),
+        onPrimaryContainer = Color(0xFFE0E7FF),
+        secondary = Color(0xFFA6ADBB),
+        onSecondary = Color(0xFF11151D),
+        background = Color(0xFF0E1116),
+        onBackground = Color(0xFFF2F3F5),
+        surface = Color(0xFF0E1116),
+        onSurface = Color(0xFFF2F3F5),
+        surfaceVariant = Color(0xFF171B23),
+        onSurfaceVariant = Color(0xFFA6ADBB),
+        outline = Color(0x1FFFFFFF),
         outlineVariant = Color(0x14FFFFFF),
-        surfaceContainer = Color(0xFF1A1A1A),
-        surfaceContainerHigh = Color(0xFF272727)     // bg-pill
+        surfaceContainer = Color(0xFF1B2029),
+        surfaceContainerHigh = Color(0xFF252B36)
     )
 
     val LightColors = lightColorScheme(
         primary = Accent,
         onPrimary = Color(0xFFFFFFFF),
-        primaryContainer = Color(0xFFFFD9E2),
-        onPrimaryContainer = Color(0xFF3E001D),
-        secondary = Color(0xFF606060),
+        primaryContainer = IndigoSoft,
+        onPrimaryContainer = Color(0xFF1E1B4B),
+        secondary = Color(0xFF4E5969),
         onSecondary = Color(0xFFFFFFFF),
-        background = Color(0xFFFFFFFF),
-        onBackground = Color(0xFF0F0F0F),
+        background = Color(0xFFF7F8FA),
+        onBackground = Color(0xFF1D2129),
         surface = Color(0xFFFFFFFF),
-        onSurface = Color(0xFF0F0F0F),
-        surfaceVariant = Color(0xFFF8F9FA),          // bg-elevated
-        onSurfaceVariant = Color(0xFF606060),
-        outline = Color(0x12000000),                 // 7% 黑描边
-        outlineVariant = Color(0x12000000),
-        surfaceContainer = Color(0xFFF8F9FA),
-        surfaceContainerHigh = Color(0xFFF2F2F2)     // bg-pill
+        onSurface = Color(0xFF1D2129),
+        surfaceVariant = Color(0xFFFFFFFF),
+        onSurfaceVariant = Color(0xFF4E5969),
+        outline = Color(0x0F000000),
+        outlineVariant = Color(0x0F000000),
+        surfaceContainer = Color(0xFFF0F2F5),
+        surfaceContainerHigh = Color(0xFFEAECEF)
     )
 }
 
@@ -81,34 +84,34 @@ data class DavExtraColors(
 
 val LocalDavExtra = staticCompositionLocalOf {
     DavExtraColors(
-        pill = Color(0xFF272727),
-        pillHover = Color(0xFF3F3F3F),
+        pill = Color(0xFF252B36),
+        pillHover = Color(0xFF303746),
         hairline = Color(0x14FFFFFF),
-        textMuted = Color(0xFF717171),
-        pillActiveBg = Color(0xFFF1F1F1),
-        pillActiveText = Color(0xFF0F0F0F),
-        glass = Color(0xDB0F0F0F)
+        textMuted = Color(0xFF8B93A1),
+        pillActiveBg = Color(0xFFA5B4FC),
+        pillActiveText = Color(0xFF11162A),
+        glass = Color(0xE60E1116)
     )
 }
 
 val DavExtraDark = DavExtraColors(
-    pill = Color(0xFF272727),
-    pillHover = Color(0xFF3F3F3F),
+    pill = Color(0xFF252B36),
+    pillHover = Color(0xFF303746),
     hairline = Color(0x14FFFFFF),
-    textMuted = Color(0xFF717171),
-    pillActiveBg = Color(0xFFF1F1F1),
-    pillActiveText = Color(0xFF0F0F0F),
-    glass = Color(0xDB0F0F0F)
+    textMuted = Color(0xFF8B93A1),
+    pillActiveBg = Color(0xFFA5B4FC),
+    pillActiveText = Color(0xFF11162A),
+    glass = Color(0xE60E1116)
 )
 
 val DavExtraLight = DavExtraColors(
-    pill = Color(0xFFF2F2F2),
-    pillHover = Color(0xFFE5E5E5),
-    hairline = Color(0x12000000),
-    textMuted = Color(0xFF909090),
-    pillActiveBg = Color(0xFF0F0F0F),
+    pill = Color(0xFFF0F2F5),
+    pillHover = Color(0xFFE5E8EE),
+    hairline = Color(0x0F000000),
+    textMuted = Color(0xFF86909C),
+    pillActiveBg = Color(0xFF4F46E5),
     pillActiveText = Color(0xFFFFFFFF),
-    glass = Color(0xE0FFFFFF)
+    glass = Color(0xF2FFFFFF)
 )
 
 /** 一次性提供 MaterialTheme 色板 + 扩展令牌 */
