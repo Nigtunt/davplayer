@@ -139,7 +139,10 @@ fun KomgaTab(
         }
     }
 
-    val route = stack.last()
+    val route = stack.lastOrNull() ?: KomgaRoute.Home
+    val goBack: () -> Unit = {
+        if (stack.size > 1) stack = stack.dropLast(1)
+    }
     Column(Modifier.fillMaxSize().background(Bg)) {
         if (route !is KomgaRoute.Reader) {
             KomgaTopBar(
@@ -151,7 +154,7 @@ fun KomgaTab(
                     is KomgaRoute.Reader -> route.book.title
                 },
                 canBack = stack.size > 1,
-                onBack = { stack = stack.dropLast(1) }
+                onBack = goBack
             )
             HorizontalDivider(color = Hairline, thickness = 1.dp)
         }
@@ -184,13 +187,13 @@ fun KomgaTab(
                     client = client,
                     readListId = route.id,
                     title = route.title,
-                    onDeleted = { stack = stack.dropLast(1) }
+                    onDeleted = goBack
                 )
 
                 is KomgaRoute.Reader -> ReaderScreen(
                     client = client,
                     book = route.book,
-                    onBack = { stack = stack.dropLast(1) }
+                    onBack = goBack
                 )
             }
         }

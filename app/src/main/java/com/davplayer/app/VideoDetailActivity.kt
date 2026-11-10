@@ -8,6 +8,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,14 +33,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -46,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -66,6 +72,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -80,6 +87,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.net.URLDecoder
 
@@ -94,11 +102,15 @@ class VideoDetailActivity : ComponentActivity() {
         const val EXTRA_SUBTITLE_SIZE = "subtitle_size"
         const val EXTRA_SIZE = "size"
         const val EXTRA_LAST_MODIFIED = "last_modified"
+        private const val EXTERNAL_SUBTITLE_LABEL = "davplayer-external:"
     }
 
     private var player: ExoPlayer? = null
     private var davClient: WebDavClient? = null
     private var videoUrl = ""
+    private var videoHref = ""
+    private var videoTitle = ""
+    private val historyStore by lazy { HistoryStore(this) }
     private val fullscreen = mutableStateOf(false)
     private val embeddedGroups = mutableStateOf<List<Tracks.Group>>(emptyList())
     private val subtitleHref = mutableStateOf<String?>(null)
@@ -108,6 +120,8 @@ class VideoDetailActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val href = intent.getStringExtra(EXTRA_HREF) ?: run { finish(); return }
         val title = intent.getStringExtra(EXTRA_TITLE) ?: href.substringAfterLast('/')
+        videoHref = href
+        videoTitle = title
         val startPosition = intent.getLongExtra(EXTRA_POSITION, 0L)
         subtitleHref.value = intent.getStringExtra(EXTRA_SUBTITLE_HREF)
         subtitleName.value = intent.getStringExtra(EXTRA_SUBTITLE_NAME)
@@ -132,6 +146,7 @@ class VideoDetailActivity : ComponentActivity() {
                 )
                     .setMimeType(subtitleMime(subHref))
                     .setLanguage("und")
+                    .setLabel(EXTERNAL_SUBTITLE_LABEL + subHref.substringAfterLast('/'))
                     .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                     .build()
             }
@@ -148,9 +163,26 @@ class VideoDetailActivity : ComponentActivity() {
                 .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
                 .build()
                 .apply {
+                    val exoPlayer = this
                     addListener(object : Player.Listener {
                         override fun onTracksChanged(tracks: Tracks) {
-                            embeddedGroups.value = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+                            val textGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+                            embeddedGroups.value = textGroups.filterNot {
+                                it.getTrackFormat(0).label?.startsWith(EXTERNAL_SUBTITLE_LABEL) == true
+                            }
+                            if (subtitleHref.value != null) {
+                                textGroups.firstOrNull {
+                                    it.getTrackFormat(0).label?.startsWith(EXTERNAL_SUBTITLE_LABEL) == true
+                                }?.let { external ->
+                                    if (!external.isSelected) applyTextTrack(exoPlayer, external)
+                                }
+                            }
+                        }
+
+                        override fun onPlaybackStateChanged(playbackState: Int) {
+                            if (playbackState == Player.STATE_READY) {
+                                this@VideoDetailActivity.saveHistory()
+                            }
                         }
                     })
                     setMediaItem(item)
@@ -160,6 +192,12 @@ class VideoDetailActivity : ComponentActivity() {
                 }
         }.getOrNull()
         player = exo
+        lifecycleScope.launch {
+            while (true) {
+                delay(5000)
+                if (exo?.isPlaying == true) saveHistory()
+            }
+        }
 
         setContent {
             DavThemeProvider(dark = resolveDark(settings.themeMode)) {
@@ -219,6 +257,7 @@ class VideoDetailActivity : ComponentActivity() {
         )
             .setMimeType(subtitleMime(entry.name))
             .setLanguage("und")
+            .setLabel(EXTERNAL_SUBTITLE_LABEL + entry.name)
             .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
             .build()
         val item = MediaItem.Builder()
@@ -256,12 +295,31 @@ class VideoDetailActivity : ComponentActivity() {
         }
     }
 
+    private fun saveHistory() {
+        val exo = player ?: return
+        val duration = exo.duration
+        if (duration <= 0 || videoHref.isBlank()) return
+        var position = exo.currentPosition.coerceAtLeast(0)
+        if (duration - position < 8000) position = 0
+        historyStore.upsert(
+            HistoryItem(
+                href = videoHref,
+                title = videoTitle,
+                positionMs = position,
+                durationMs = duration,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
     override fun onPause() {
+        saveHistory()
         player?.pause()
         super.onPause()
     }
 
     override fun onDestroy() {
+        saveHistory()
         player?.release()
         player = null
         super.onDestroy()
@@ -293,6 +351,22 @@ private fun VideoDetailScreen(
     val meta = parseVideoMeta(title)
     val ctx = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val copyLink: () -> Unit = {
+        client?.let {
+            clipboard.setText(AnnotatedString(it.fileUrl(href)))
+            Toast.makeText(ctx, "已复制直链", Toast.LENGTH_SHORT).show()
+        }
+        Unit
+    }
+    val externalPlay: () -> Unit = {
+        client?.let {
+            player?.pause()
+            if (!openWithExternalPlayer(ctx, it.fileUrlWithCredentials(href), title)) {
+                Toast.makeText(ctx, "没有找到可用的外部播放器", Toast.LENGTH_SHORT).show()
+            }
+        }
+        Unit
+    }
 
     if (fullscreen) {
         BackHandler { onBack() }
@@ -303,9 +377,10 @@ private fun VideoDetailScreen(
                     title = title,
                     quality = meta.labels.firstOrNull(),
                     fullscreen = true,
-                    subtitleName = subtitleName,
                     onBack = onBack,
                     onToggleFullscreen = onToggleFullscreen,
+                    onCopyLink = copyLink,
+                    onExternalPlay = externalPlay,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
@@ -320,9 +395,10 @@ private fun VideoDetailScreen(
                     title = title,
                     quality = meta.labels.firstOrNull(),
                     fullscreen = false,
-                    subtitleName = subtitleName,
                     onBack = onBack,
                     onToggleFullscreen = onToggleFullscreen,
+                    onCopyLink = copyLink,
+                    onExternalPlay = externalPlay,
                     modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
                 )
             } else {
@@ -381,31 +457,6 @@ private fun VideoDetailScreen(
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    QuickAction(Icons.Default.Fullscreen, "全屏", onToggleFullscreen)
-                    QuickAction(Icons.Default.Subtitles, "字幕") { showSubtitlePicker = true }
-                    QuickAction(Icons.Default.ContentCopy, "复制直链") {
-                        val clientNow = client ?: return@QuickAction
-                        clipboard.setText(AnnotatedString(clientNow.fileUrl(href)))
-                        Toast.makeText(ctx, "已复制直链", Toast.LENGTH_SHORT).show()
-                    }
-                    QuickAction(Icons.Default.OpenInNew, "外部播放") {
-                        val clientNow = client ?: return@QuickAction
-                        player?.pause()
-                        if (!openWithExternalPlayer(ctx, clientNow.fileUrlWithCredentials(href), title)) {
-                            Toast.makeText(ctx, "没有找到可用的外部播放器", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -564,15 +615,18 @@ private fun InlineVideoPlayer(
     title: String,
     quality: String?,
     fullscreen: Boolean,
-    subtitleName: String?,
     onBack: () -> Unit,
     onToggleFullscreen: () -> Unit,
+    onCopyLink: () -> Unit,
+    onExternalPlay: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var playing by remember { mutableStateOf(player.isPlaying) }
     var position by remember { mutableLongStateOf(player.currentPosition.coerceAtLeast(0)) }
     var duration by remember { mutableLongStateOf(player.duration.coerceAtLeast(0)) }
-    var dragValue by remember { mutableStateOf<Float?>(null) }
+    var seekFraction by remember { mutableStateOf<Float?>(null) }
+    var speed by remember { mutableFloatStateOf(1f) }
+    var menuOpen by remember { mutableStateOf(false) }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -652,6 +706,37 @@ private fun InlineVideoPlayer(
                     )
                 }
             }
+            Box {
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(Icons.Default.MoreVert, "更多", tint = Color.White)
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("复制直链") },
+                        leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
+                        onClick = {
+                            menuOpen = false
+                            onCopyLink()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("外部播放") },
+                        leadingIcon = { Icon(Icons.Default.OpenInNew, null) },
+                        onClick = {
+                            menuOpen = false
+                            onExternalPlay()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (fullscreen) "退出全屏" else "全屏") },
+                        leadingIcon = { Icon(Icons.Default.Fullscreen, null) },
+                        onClick = {
+                            menuOpen = false
+                            onToggleFullscreen()
+                        }
+                    )
+                }
+            }
         }
 
         Box(
@@ -685,35 +770,72 @@ private fun InlineVideoPlayer(
                 .padding(horizontal = 10.dp, vertical = 5.dp)
         ) {
             val dur = duration.coerceAtLeast(1L)
-            Slider(
-                value = dragValue ?: position.toFloat().coerceIn(0f, dur.toFloat()),
-                valueRange = 0f..dur.toFloat(),
-                onValueChange = { dragValue = it },
-                onValueChangeFinished = {
-                    dragValue?.let { player.seekTo(it.toLong()) }
-                    dragValue = null
-                },
-                modifier = Modifier.fillMaxWidth().height(22.dp)
-            )
+            val fraction = (seekFraction ?: (position.toFloat() / dur.toFloat())).coerceIn(0f, 1f)
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(16.dp)
+                    .pointerInput(duration) {
+                        detectTapGestures { tap ->
+                            val f = (tap.x / size.width).coerceIn(0f, 1f)
+                            player.seekTo((f * dur).toLong())
+                        }
+                    }
+                    .pointerInput(duration) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { seekFraction = fraction },
+                            onHorizontalDrag = { change, _ ->
+                                seekFraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                                change.consume()
+                            },
+                            onDragEnd = {
+                                seekFraction?.let { player.seekTo((it * dur).toLong()) }
+                                seekFraction = null
+                            },
+                            onDragCancel = { seekFraction = null }
+                        )
+                    }
+            ) {
+                Box(
+                    Modifier
+                        .align(Alignment.Center)
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(99.dp))
+                        .background(Color.White.copy(alpha = 0.24f))
+                )
+                Box(
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .fillMaxWidth(fraction)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(99.dp))
+                        .background(DavTheme.Coral)
+                )
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "${formatMs(dragValue?.toLong() ?: position)} / ${formatMs(duration)}",
+                    "${formatMs(seekFraction?.let { (it * dur).toLong() } ?: position)} / ${formatMs(duration)}",
                     color = Color.White.copy(alpha = 0.86f),
                     fontSize = 10.sp
                 )
                 Spacer(Modifier.weight(1f))
-                if (!subtitleName.isNullOrBlank()) {
-                    Text("中字", color = Color(0xFFFF6B6B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.width(10.dp))
-                }
-                IconButton(
-                    onClick = onToggleFullscreen,
-                    modifier = Modifier.size(34.dp)
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable {
+                            val presets = listOf(1f, 1.25f, 1.5f, 2f)
+                            val next = presets[(presets.indexOf(speed).coerceAtLeast(0) + 1) % presets.size]
+                            speed = next
+                            player.setPlaybackSpeed(next)
+                        }
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
                 ) {
-                    Icon(
-                        Icons.Default.Fullscreen, if (fullscreen) "退出全屏" else "全屏",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+                    Text(
+                        if (speed == 1f) "1.0x" else "${speed}x",
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }

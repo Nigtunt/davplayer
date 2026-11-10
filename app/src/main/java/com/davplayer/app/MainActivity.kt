@@ -814,7 +814,21 @@ fun BrowseScreen(
                         actionTarget = null
                         scope.launch {
                             val pos = historyStore.get(target.href)?.positionMs ?: 0L
-                            startPlayer(ctx, target.href, target.name, pos)
+                            val base = target.name.substringBeforeLast('.').lowercase()
+                            val subtitle = subtitles.firstOrNull {
+                                it.name.substringBeforeLast('.').lowercase() == base
+                            }
+                            startVideoDetail(
+                                ctx = ctx,
+                                href = target.href,
+                                title = target.name,
+                                positionMs = pos,
+                                subtitleHref = subtitle?.href,
+                                subtitleName = subtitle?.name,
+                                subtitleSize = subtitle?.size ?: 0L,
+                                size = target.size,
+                                lastModified = target.lastModified
+                            )
                         }
                     }
                 }
@@ -1973,7 +1987,7 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(MaterialTheme.colorScheme.surface)
                                 .combinedClickable(
-                                    onClick = { startPlayer(ctx, item.href, item.title, item.positionMs) },
+                                    onClick = { startVideoDetail(ctx, item.href, item.title, item.positionMs) },
                                     onLongClick = { menuOpen = true }
                                 )
                                 .padding(10.dp)
@@ -2036,7 +2050,7 @@ fun HistoryScreen(onJumpToDir: (String) -> Unit = {}) {
                                 Modifier
                                     .clip(RoundedCornerShape(50))
                                     .background(MaterialTheme.colorScheme.primaryContainer)
-                                    .clickable { startPlayer(ctx, item.href, item.title, item.positionMs) }
+                                    .clickable { startVideoDetail(ctx, item.href, item.title, item.positionMs) }
                                     .padding(horizontal = 10.dp, vertical = 5.dp)
                             ) {
                                 Text(

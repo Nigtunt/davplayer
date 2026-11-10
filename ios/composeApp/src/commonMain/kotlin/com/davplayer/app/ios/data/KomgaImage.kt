@@ -29,8 +29,13 @@ import com.davplayer.app.ios.theme.Brand
 import com.davplayer.app.ios.theme.Muted
 import com.davplayer.app.ios.theme.SurfaceHigh
 
-/** 内存图片缓存（封面/漫画页）；后续可换成加密磁盘缓存 */
+/** 内存图片缓存（封面/漫画页）；磁盘层负责冷启动复用 */
 private val imageCache = LinkedHashMap<String, ImageBitmap>()
+
+private fun diskPath(cacheKey: String): String? {
+    val dir = imageCacheDir() ?: return null
+    return "$dir/${cacheKey.hashCode().toUInt().toString(16)}.img"
+}
 
 private fun cachePut(url: String, bitmap: ImageBitmap) {
     // iPad 2019 内存紧张；Skia 的图片内存对 iOS 不可见，压低缓存上限
@@ -51,8 +56,13 @@ object KomgaImages {
     ): ImageBitmap? {
         if (ComicStore.safeMode) return null
 
+        val cacheKey = "$maxWidth|$url"
+        imageCache[cacheKey]?.let { return it }
+        val path = diskPath(cacheKey)
         val bytes = withContext(Dispatchers.Default) {
-            runCatching {
+            path?.let { cached ->
+                readFileBytes(cached)?.takeIf { it.isNotEmpty() }
+            } ?: runCatching {
                 val response = http.get(url) {
                     header(HttpHeaders.Authorization, auth)
                 }
@@ -64,13 +74,16 @@ object KomgaImages {
                 }
             }.onFailure {
                 AppLog.warn("Komga", "图片下载失败：$url")
-            }.getOrNull()
+            }.getOrNull()?.also { downloaded ->
+                path?.let { writeFileBytes(it, downloaded) }
+            }
         } ?: return null
 
         return withContext(Dispatchers.Main) {
             runCatching { decodeImageBitmap(bytes, maxWidth) }
                 .onFailure { AppLog.warn("Komga", "图片解码失败：$url") }
                 .getOrNull()
+                ?.also { cachePut(cacheKey, it) }
         }
     }
 
