@@ -167,15 +167,21 @@ class VideoDetailActivity : ComponentActivity() {
                     addListener(object : Player.Listener {
                         override fun onTracksChanged(tracks: Tracks) {
                             val textGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
-                            embeddedGroups.value = textGroups.filterNot {
-                                it.getTrackFormat(0).label?.startsWith(EXTERNAL_SUBTITLE_LABEL) == true
-                            }
-                            if (subtitleHref.value != null) {
+                            val external = if (subtitleHref.value != null) {
                                 textGroups.firstOrNull {
                                     it.getTrackFormat(0).label?.startsWith(EXTERNAL_SUBTITLE_LABEL) == true
-                                }?.let { external ->
-                                    if (!external.isSelected) applyTextTrack(exoPlayer, external)
+                                } ?: textGroups.lastOrNull()
+                            } else {
+                                textGroups.firstOrNull {
+                                    it.getTrackFormat(0).label?.startsWith(EXTERNAL_SUBTITLE_LABEL) == true
                                 }
+                            }
+                            embeddedGroups.value = textGroups.filterNot { group ->
+                                group === external ||
+                                    group.getTrackFormat(0).label?.startsWith(EXTERNAL_SUBTITLE_LABEL) == true
+                            }
+                            if (external != null && !external.isSelected) {
+                                applyTextTrack(exoPlayer, external)
                             }
                         }
 
@@ -297,10 +303,11 @@ class VideoDetailActivity : ComponentActivity() {
 
     private fun saveHistory() {
         val exo = player ?: return
-        val duration = exo.duration
-        if (duration <= 0 || videoHref.isBlank()) return
+        if (videoHref.isBlank()) return
+        val previous = historyStore.get(videoHref)
+        val duration = exo.duration.coerceAtLeast(previous?.durationMs ?: 0L).coerceAtLeast(1L)
         var position = exo.currentPosition.coerceAtLeast(0)
-        if (duration - position < 8000) position = 0
+        if (duration > 1 && duration - position < 8000) position = 0
         historyStore.upsert(
             HistoryItem(
                 href = videoHref,
