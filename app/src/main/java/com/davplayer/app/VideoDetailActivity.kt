@@ -2,6 +2,7 @@ package com.davplayer.app
 
 import android.content.pm.ActivityInfo
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -28,7 +29,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Subtitles
@@ -52,7 +55,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -286,6 +291,8 @@ private fun VideoDetailScreen(
 ) {
     var showSubtitlePicker by remember { mutableStateOf(false) }
     val meta = parseVideoMeta(title)
+    val ctx = LocalContext.current
+    val clipboard = LocalClipboardManager.current
 
     if (fullscreen) {
         BackHandler { onBack() }
@@ -374,6 +381,31 @@ private fun VideoDetailScreen(
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    QuickAction(Icons.Default.Fullscreen, "全屏", onToggleFullscreen)
+                    QuickAction(Icons.Default.Subtitles, "字幕") { showSubtitlePicker = true }
+                    QuickAction(Icons.Default.ContentCopy, "复制直链") {
+                        val clientNow = client ?: return@QuickAction
+                        clipboard.setText(AnnotatedString(clientNow.fileUrl(href)))
+                        Toast.makeText(ctx, "已复制直链", Toast.LENGTH_SHORT).show()
+                    }
+                    QuickAction(Icons.Default.OpenInNew, "外部播放") {
+                        val clientNow = client ?: return@QuickAction
+                        player?.pause()
+                        if (!openWithExternalPlayer(ctx, clientNow.fileUrlWithCredentials(href), title)) {
+                            Toast.makeText(ctx, "没有找到可用的外部播放器", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -686,6 +718,33 @@ private fun InlineVideoPlayer(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun QuickAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, label, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(19.dp))
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(label, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
