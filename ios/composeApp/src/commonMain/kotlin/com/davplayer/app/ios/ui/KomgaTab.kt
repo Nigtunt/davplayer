@@ -401,23 +401,22 @@ private fun KomgaHome(
             }
 
             if (latest.isNotEmpty()) {
-                item { ComicSectionHeader("最新入库", "${latest.size} 个系列") }
-                lazyItems(latest.chunked(3), key = { row -> row.joinToString("|") { it.id } }) { row ->
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                item {
+                    ComicSectionHeader("最新入库", "${latest.size} 个系列")
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        row.forEach { series ->
+                        lazyItems(latest, key = { it.id }) { series ->
                             ComicGridCard(
                                 title = series.title,
                                 subtitle = "${series.booksCount} 本",
                                 coverUrl = client.seriesThumbUrl(series.id),
                                 auth = client.authHeader,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.width(132.dp),
                                 onClick = { onOpenSeries(series) }
                             )
                         }
-                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }

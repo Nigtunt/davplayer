@@ -261,7 +261,7 @@ fun BrowserScreen(
             val entry = entries?.firstOrNull { it.href == href } ?: return@LaunchedEffect
             if (entry.isDir) return@LaunchedEffect
             autoPlayedHref = href
-            selected = entry
+            selected = null
             startPlay(entry)
             // 消费掉这次历史请求，避免切 tab / BrowserScreen 重建后再次自动播放
             onHistoryConsumed()
@@ -275,7 +275,8 @@ fun BrowserScreen(
             } else if (isSubtitleFile(entry.name)) {
                 selected = entry
             } else {
-                selected = entry
+                // 视频直接进播放器，不保留列表选中态，避免关闭后残留灰色高亮/阴影
+                selected = null
                 startPlay(entry)
             }
         }

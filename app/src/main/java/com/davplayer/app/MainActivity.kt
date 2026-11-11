@@ -956,7 +956,7 @@ private fun ModernBrowseHeader(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .height(40.dp)
+                        .height(48.dp)
                         .clip(RoundedCornerShape(11.dp))
                         .background(MaterialTheme.colorScheme.surface)
                         .border(1.dp, extra.hairline, RoundedCornerShape(11.dp))
@@ -966,25 +966,25 @@ private fun ModernBrowseHeader(
                 ) {
                     Box(
                         Modifier
-                            .size(26.dp)
-                            .clip(RoundedCornerShape(7.dp))
+                            .size(30.dp)
+                            .clip(RoundedCornerShape(8.dp))
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Default.Storage, null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                     }
-                    Spacer(Modifier.width(7.dp))
+                    Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(5.dp).clip(CircleShape).background(statusColor))
                             Spacer(Modifier.width(4.dp))
                             Text(
                                 sourceName,
-                                fontSize = 13.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
@@ -995,7 +995,8 @@ private fun ModernBrowseHeader(
                             "WebDAV · $statusText",
                             fontSize = 9.sp,
                             color = extra.textMuted,
-                            maxLines = 1
+                            maxLines = 1,
+                            modifier = Modifier.padding(top = 1.dp)
                         )
                     }
                     Icon(
@@ -1110,7 +1111,7 @@ private fun HeaderCircleButton(
 ) {
     Box(
         Modifier
-            .size(40.dp)
+            .size(48.dp)
             .shadow(2.dp, CircleShape, ambientColor = Color(0x0A101828))
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surface)
@@ -1120,7 +1121,7 @@ private fun HeaderCircleButton(
         Icon(
             icon, description,
             tint = if (enabled) MaterialTheme.colorScheme.onSurface else davExtra().textMuted.copy(alpha = 0.4f),
-            modifier = Modifier.size(19.dp)
+            modifier = Modifier.size(21.dp)
         )
     }
 }
@@ -1249,7 +1250,7 @@ private fun BrowseRow(
                 maxLines = if (isSubtitle) 2 else 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(3.dp))
 
             if (isSubtitle) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1289,19 +1290,18 @@ private fun BrowseRow(
                         }
                     }
                     if (unsupported) {
-                        Text("需外部播放器", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+                        Text("需外部播放器", fontSize = 9.sp, color = MaterialTheme.colorScheme.error)
                     }
-                }
-                Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        formatSize(entry.size),
-                        fontSize = 10.sp,
-                        color = extra.textMuted
+                        buildString {
+                            append(formatSize(entry.size))
+                            formatDavModified(entry.lastModified)?.let { append(" · $it") }
+                        },
+                        fontSize = 9.sp,
+                        color = extra.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    formatDavModified(entry.lastModified)?.let {
-                        Text("  ·  $it", fontSize = 10.sp, color = extra.textMuted, maxLines = 1)
-                    }
                 }
                 Spacer(Modifier.weight(1f))
                 history?.let {
@@ -1310,7 +1310,8 @@ private fun BrowseRow(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
                         color = DavTheme.Coral,
-                        maxLines = 1
+                        maxLines = 1,
+                        modifier = Modifier.padding(bottom = 1.dp)
                     )
                 }
             }
