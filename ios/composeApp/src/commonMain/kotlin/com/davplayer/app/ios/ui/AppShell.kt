@@ -213,7 +213,7 @@ private fun TabRail(selected: AppTab, onSelect: (AppTab) -> Unit) {
         Modifier
             .width(84.dp)
             .fillMaxHeight()
-            .background(SurfaceBg)
+            .background(Bg)
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Bottom))
             .padding(vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -224,15 +224,23 @@ private fun TabRail(selected: AppTab, onSelect: (AppTab) -> Unit) {
                 Modifier
                     .fillMaxWidth()
                     .clickable { onSelect(tab) }
-                    .padding(vertical = 13.dp),
+                    .padding(vertical = 11.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    imageVector = tab.icon,
-                    contentDescription = tab.label,
-                    tint = if (active) Brand else Muted,
-                    modifier = Modifier.size(21.dp)
-                )
+                Box(
+                    Modifier
+                        .size(30.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (active) Brand.copy(alpha = 0.10f) else Color.Transparent),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = tab.icon,
+                        contentDescription = tab.label,
+                        tint = if (active) Brand else Muted,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
                 Spacer(Modifier.height(3.dp))
                 Text(
                     tab.label,
@@ -247,22 +255,27 @@ private fun TabRail(selected: AppTab, onSelect: (AppTab) -> Unit) {
 
 @Composable
 private fun BottomTabs(selected: AppTab, onSelect: (AppTab) -> Unit) {
-    Column {
-        HorizontalDivider(color = Hairline, thickness = 1.dp)
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .background(SurfaceBg)
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AppTab.entries.forEach { tab ->
-                val active = tab == selected
-                Column(
-                    Modifier.clickable { onSelect(tab) }.padding(horizontal = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(62.dp)
+            .background(SurfaceBg)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AppTab.entries.forEach { tab ->
+            val active = tab == selected
+            Column(
+                Modifier.clickable { onSelect(tab) }.padding(horizontal = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    Modifier
+                        .size(30.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (active) Brand.copy(alpha = 0.10f) else Color.Transparent),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = tab.icon,
@@ -270,13 +283,13 @@ private fun BottomTabs(selected: AppTab, onSelect: (AppTab) -> Unit) {
                         tint = if (active) Brand else Muted,
                         modifier = Modifier.size(19.dp)
                     )
-                    Text(
-                        tab.label,
-                        fontSize = 10.sp,
-                        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                        color = if (active) Brand else Muted
-                    )
                 }
+                Text(
+                    tab.label,
+                    fontSize = 10.sp,
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                    color = if (active) Brand else Muted
+                )
             }
         }
     }
