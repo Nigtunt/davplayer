@@ -956,7 +956,7 @@ private fun ModernBrowseHeader(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .height(48.dp)
+                        .height(40.dp)
                         .clip(RoundedCornerShape(11.dp))
                         .background(MaterialTheme.colorScheme.surface)
                         .border(1.dp, extra.hairline, RoundedCornerShape(11.dp))
@@ -966,39 +966,37 @@ private fun ModernBrowseHeader(
                 ) {
                     Box(
                         Modifier
-                            .size(30.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .size(26.dp)
+                            .clip(RoundedCornerShape(7.dp))
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Default.Storage, null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(17.dp)
+                            modifier = Modifier.size(15.dp)
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(5.dp).clip(CircleShape).background(statusColor))
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                sourceName,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Text(
-                            "WebDAV · $statusText",
-                            fontSize = 9.sp,
-                            color = extra.textMuted,
-                            maxLines = 1,
-                            modifier = Modifier.padding(top = 1.dp)
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        sourceName,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (statusText == "加载中") {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            color = statusColor,
+                            strokeWidth = 1.5.dp
                         )
+                    } else {
+                        Box(Modifier.size(6.dp).clip(CircleShape).background(statusColor))
                     }
+                    Spacer(Modifier.width(3.dp))
                     Icon(
                         Icons.Default.ArrowDropDown, "切换 WebDAV 库",
                         tint = extra.textMuted,
@@ -1111,7 +1109,7 @@ private fun HeaderCircleButton(
 ) {
     Box(
         Modifier
-            .size(48.dp)
+            .size(40.dp)
             .shadow(2.dp, CircleShape, ambientColor = Color(0x0A101828))
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surface)
@@ -1121,7 +1119,7 @@ private fun HeaderCircleButton(
         Icon(
             icon, description,
             tint = if (enabled) MaterialTheme.colorScheme.onSurface else davExtra().textMuted.copy(alpha = 0.4f),
-            modifier = Modifier.size(21.dp)
+            modifier = Modifier.size(18.dp)
         )
     }
 }
@@ -1241,77 +1239,81 @@ private fun BrowseRow(
 
         Spacer(Modifier.width(12.dp))
 
-        Column(Modifier.weight(1f).height(contentHeight)) {
-            Text(
-                entry.name,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = if (isSubtitle) 2 else 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(3.dp))
+        Box(Modifier.weight(1f).height(contentHeight)) {
+            Column(Modifier.fillMaxWidth()) {
+                Text(
+                    entry.name,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = if (isSubtitle) 2 else 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(3.dp))
 
-            if (isSubtitle) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        entry.name.substringAfterLast('.', "").uppercase().ifBlank { "字幕" },
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        " · ${formatSize(entry.size)}",
-                        fontSize = 10.sp,
-                        color = extra.textMuted
-                    )
-                    formatDavModified(entry.lastModified)?.let {
-                        Text(" · $it", fontSize = 10.sp, color = extra.textMuted, maxLines = 1)
-                    }
-                }
-            } else {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    meta.labels.take(3).forEach { label ->
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer)
-                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                label,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                if (isSubtitle) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            entry.name.substringAfterLast('.', "").uppercase().ifBlank { "字幕" },
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            " · ${formatSize(entry.size)}",
+                            fontSize = 10.sp,
+                            color = extra.textMuted
+                        )
+                        formatDavModified(entry.lastModified)?.let {
+                            Text(" · $it", fontSize = 10.sp, color = extra.textMuted, maxLines = 1)
                         }
                     }
-                    if (unsupported) {
-                        Text("需外部播放器", fontSize = 9.sp, color = MaterialTheme.colorScheme.error)
+                } else {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        meta.labels.take(3).forEach { label ->
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer)
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    label,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        if (unsupported) {
+                            Text("需外部播放器", fontSize = 9.sp, color = MaterialTheme.colorScheme.error)
+                        }
+                        Text(
+                            buildString {
+                                append(formatSize(entry.size))
+                                formatDavModified(entry.lastModified)?.let { append(" · $it") }
+                            },
+                            fontSize = 9.sp,
+                            color = extra.textMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-                    Text(
-                        buildString {
-                            append(formatSize(entry.size))
-                            formatDavModified(entry.lastModified)?.let { append(" · $it") }
-                        },
-                        fontSize = 9.sp,
-                        color = extra.textMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
                 }
-                Spacer(Modifier.weight(1f))
+            }
+            if (!isSubtitle) {
                 history?.let {
                     Text(
                         "看到 ${formatMs(it.positionMs)}",
                         fontSize = 10.sp,
+                        lineHeight = 12.sp,
                         fontWeight = FontWeight.Medium,
                         color = DavTheme.Coral,
                         maxLines = 1,
-                        modifier = Modifier.padding(bottom = 1.dp)
+                        modifier = Modifier.align(Alignment.BottomStart)
                     )
                 }
             }
