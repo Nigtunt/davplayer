@@ -956,7 +956,7 @@ private fun ModernBrowseHeader(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .height(36.dp)
+                        .height(40.dp)
                         .clip(RoundedCornerShape(11.dp))
                         .background(MaterialTheme.colorScheme.surface)
                         .border(1.dp, extra.hairline, RoundedCornerShape(11.dp))
@@ -966,7 +966,7 @@ private fun ModernBrowseHeader(
                 ) {
                     Box(
                         Modifier
-                            .size(24.dp)
+                            .size(26.dp)
                             .clip(RoundedCornerShape(7.dp))
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center
@@ -974,17 +974,17 @@ private fun ModernBrowseHeader(
                         Icon(
                             Icons.Default.Storage, null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(15.dp)
                         )
                     }
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(7.dp))
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(5.dp).clip(CircleShape).background(statusColor))
                             Spacer(Modifier.width(4.dp))
                             Text(
                                 sourceName,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
@@ -993,7 +993,7 @@ private fun ModernBrowseHeader(
                         }
                         Text(
                             "WebDAV · $statusText",
-                            fontSize = 8.sp,
+                            fontSize = 9.sp,
                             color = extra.textMuted,
                             maxLines = 1
                         )
@@ -1001,7 +1001,7 @@ private fun ModernBrowseHeader(
                     Icon(
                         Icons.Default.ArrowDropDown, "切换 WebDAV 库",
                         tint = extra.textMuted,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
                 DropdownMenu(
@@ -1110,7 +1110,7 @@ private fun HeaderCircleButton(
 ) {
     Box(
         Modifier
-            .size(36.dp)
+            .size(40.dp)
             .shadow(2.dp, CircleShape, ambientColor = Color(0x0A101828))
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surface)
@@ -1120,7 +1120,7 @@ private fun HeaderCircleButton(
         Icon(
             icon, description,
             tint = if (enabled) MaterialTheme.colorScheme.onSurface else davExtra().textMuted.copy(alpha = 0.4f),
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(19.dp)
         )
     }
 }
@@ -1186,7 +1186,7 @@ private fun BrowseRow(
             .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = onClick)
             .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.Top
     ) {
         Box(
             Modifier
@@ -1240,10 +1240,7 @@ private fun BrowseRow(
 
         Spacer(Modifier.width(12.dp))
 
-        Column(
-            Modifier.weight(1f).height(contentHeight),
-            verticalArrangement = Arrangement.Center
-        ) {
+        Column(Modifier.weight(1f).height(contentHeight)) {
             Text(
                 entry.name,
                 fontSize = 13.sp,
@@ -1305,16 +1302,16 @@ private fun BrowseRow(
                     formatDavModified(entry.lastModified)?.let {
                         Text("  ·  $it", fontSize = 10.sp, color = extra.textMuted, maxLines = 1)
                     }
-                    history?.let {
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            "看到 ${formatMs(it.positionMs)}",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = DavTheme.Coral,
-                            maxLines = 1
-                        )
-                    }
+                }
+                Spacer(Modifier.weight(1f))
+                history?.let {
+                    Text(
+                        "看到 ${formatMs(it.positionMs)}",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = DavTheme.Coral,
+                        maxLines = 1
+                    )
                 }
             }
         }

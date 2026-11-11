@@ -265,16 +265,40 @@ class VideoDetailActivity : ComponentActivity() {
 
     private fun captureCover(texture: TextureView) {
         if (videoHref.isBlank()) return
+        val exo = player ?: return
+        // 必须等解码器真正出画面，避免刚进页面/退出时截到黑帧
+        if (exo.playbackState != Player.STATE_READY ||
+            exo.videoSize.width <= 0 ||
+            exo.currentPosition < 2000L
+        ) return
         val now = android.os.SystemClock.elapsedRealtime()
         // 同一张封面每 10 秒覆盖一次，避免生成大量文件
         if (lastCoverCaptureAt > 0 && now - lastCoverCaptureAt < 10_000L) return
         val bitmap = texture.bitmap ?: return
+        if (isMostlyBlack(bitmap)) return
         runCatching {
             historyStore.coverFile(videoHref).outputStream().use { output ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 86, output)
             }
             lastCoverCaptureAt = now
         }
+    }
+
+    private fun isMostlyBlack(bitmap: Bitmap): Boolean {
+        val sample = runCatching {
+            Bitmap.createScaledBitmap(bitmap, 12, 12, false)
+        }.getOrNull() ?: return false
+        val pixels = IntArray(12 * 12)
+        sample.getPixels(pixels, 0, 12, 0, 0, 12, 12)
+        if (sample !== bitmap) sample.recycle()
+        var total = 0L
+        pixels.forEach { color ->
+            val r = (color shr 16) and 0xFF
+            val g = (color shr 8) and 0xFF
+            val b = color and 0xFF
+            total += (r * 299 + g * 587 + b * 114) / 1000
+        }
+        return total / pixels.size < 5
     }
 
     private fun loadSubtitle(entry: DavEntry) {
@@ -698,7 +722,7 @@ private fun InlineVideoPlayer(
     }
 
     LaunchedEffect(textureView, position) {
-        if (position > 1200) {
+        if (position > 2000) {
             textureView?.let { onCaptureCover(it) }
         }
     }
