@@ -119,7 +119,8 @@ private sealed interface KomgaRoute {
 fun KomgaTab(
     onOpenSettings: () -> Unit,
     initialBook: KomgaBook? = null,
-    onConsumed: () -> Unit = {}
+    onConsumed: () -> Unit = {},
+    onReaderOpenChange: (Boolean) -> Unit = {}
 ) {
     val config = ComicStore.config
     if (!config.isConfigured) {
@@ -146,6 +147,11 @@ fun KomgaTab(
     }
 
     val route = stack.lastOrNull() ?: KomgaRoute.Home
+    val readerOpen = route is KomgaRoute.Reader
+    LaunchedEffect(readerOpen) { onReaderOpenChange(readerOpen) }
+    DisposableEffect(Unit) {
+        onDispose { onReaderOpenChange(false) }
+    }
     val goBack: () -> Unit = {
         if (stack.size > 1) stack = stack.dropLast(1)
     }

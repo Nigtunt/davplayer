@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -21,9 +22,9 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
@@ -86,6 +87,7 @@ fun AppShell(
     var initialPath by remember { mutableStateOf<String?>(null) }
     var highlightHref by remember { mutableStateOf<String?>(null) }
     var komgaResume by remember { mutableStateOf<KomgaBook?>(null) }
+    var komgaReaderOpen by remember { mutableStateOf(false) }
     var showPrivacy by remember { mutableStateOf(false) }
 
     val activeSource = SourceStore.sourceById(activeSourceId ?: "")
@@ -101,6 +103,8 @@ fun AppShell(
     BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
         val wide = maxWidth >= WideBreakpoint
 
+        // 阅读器打开时隐藏 Tab，让漫画内容使用完整屏幕
+        val hideTabs = tab == AppTab.Komga && komgaReaderOpen
         // TabContent 只在这一处 compose。横竖屏切换时只改 padding，
         // 不移动 Compose 节点，所以内部状态（目录栈、Komga 阅读页、播放）不会丢，
         // 也避免 movableContentOf 在 iOS 布局树里搬节点导致的崩溃。
@@ -108,8 +112,8 @@ fun AppShell(
             Modifier
                 .fillMaxSize()
                 .padding(
-                    start = if (wide) 84.dp else 0.dp,
-                    bottom = if (wide) 0.dp else 56.dp
+                    start = if (wide && !hideTabs) 84.dp else 0.dp,
+                    bottom = if (!wide && !hideTabs) 56.dp else 0.dp
                 )
         ) {
             TabContent(
@@ -126,6 +130,7 @@ fun AppShell(
                     tab = AppTab.Komga
                 },
                 onKomgaConsumed = { komgaResume = null },
+                onKomgaReaderChange = { komgaReaderOpen = it },
                 onHistoryConsumed = {
                     highlightHref = null
                     initialPath = null
@@ -135,11 +140,13 @@ fun AppShell(
             )
         }
 
-        if (wide) {
-            TabRail(tab) { tab = it }
-        } else {
-            Box(Modifier.align(Alignment.BottomCenter)) {
-                BottomTabs(tab) { tab = it }
+        if (!hideTabs) {
+            if (wide) {
+                TabRail(tab) { tab = it }
+            } else {
+                Box(Modifier.align(Alignment.BottomCenter)) {
+                    BottomTabs(tab) { tab = it }
+                }
             }
         }
     }
@@ -161,6 +168,7 @@ private fun TabContent(
     onOpenPrivacy: () -> Unit,
     onResumeComic: (KomgaBook) -> Unit,
     onKomgaConsumed: () -> Unit,
+    onKomgaReaderChange: (Boolean) -> Unit,
     onHistoryConsumed: () -> Unit,
     themeMode: String,
     onThemeChange: (String) -> Unit
@@ -185,7 +193,8 @@ private fun TabContent(
         AppTab.Komga -> KomgaTab(
             onOpenSettings = onManageSources,
             initialBook = komgaResume,
-            onConsumed = onKomgaConsumed
+            onConsumed = onKomgaConsumed,
+            onReaderOpenChange = onKomgaReaderChange
         )
 
         AppTab.History -> HistoryTab(
@@ -425,61 +434,65 @@ private fun HistoryTab(
     }
 
     Box(Modifier.fillMaxSize().background(Bg), contentAlignment = Alignment.TopCenter) {
-        Column(
-            Modifier
-                .widthIn(max = 760.dp)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp)
+        LazyColumn(
+            Modifier.widthIn(max = 760.dp).fillMaxSize(),
+            contentPadding = PaddingValues(24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("历史", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TextMain)
-            Text("视频播放与漫画阅读记录", fontSize = 11.sp, color = Muted)
-            Spacer(Modifier.height(12.dp))
-
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).background(SurfaceHigh).padding(3.dp)
-            ) {
-                HistoryChip("视频", selected = segment == 0, modifier = Modifier.weight(1f)) { segment = 0 }
-                HistoryChip("漫画", selected = segment == 1, modifier = Modifier.weight(1f)) { segment = 1 }
+            item {
+                Text("历史", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TextMain)
+                Text("视频播放与漫画阅读记录", fontSize = 11.sp, color = Muted)
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).background(SurfaceHigh).padding(3.dp)
+                ) {
+                    HistoryChip("视频", selected = segment == 0, modifier = Modifier.weight(1f)) { segment = 0 }
+                    HistoryChip("漫画", selected = segment == 1, modifier = Modifier.weight(1f)) { segment = 1 }
+                }
+                Spacer(Modifier.height(8.dp))
             }
-
-            Spacer(Modifier.height(16.dp))
 
             if (segment == 0) {
                 if (history.isEmpty()) {
-                    Text("暂无视频播放历史", color = Muted, fontSize = 13.sp)
+                    item { Text("暂无视频播放历史", color = Muted, fontSize = 13.sp) }
                 } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        history.forEach { item ->
-                            HistoryRow(
-                                item = item,
-                                sourceName = SourceStore.sourceById(item.sourceId)?.name.orEmpty(),
-                                onClick = { onResume(item) }
-                            )
-                        }
+                    items(history, key = { it.path }) { item ->
+                        HistoryRow(
+                            item = item,
+                            sourceName = SourceStore.sourceById(item.sourceId)?.name.orEmpty(),
+                            onClick = { onResume(item) }
+                        )
                     }
                 }
             } else {
                 when {
-                    client == null -> Text("请先在「我的」里配置 Komga 服务器", color = Muted, fontSize = 13.sp)
-                    comicError != null -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("漫画历史加载失败：$comicError", color = Danger, fontSize = 13.sp)
-                        TextButton(onClick = { comicReload++ }) { Text("重试", color = Brand) }
+                    client == null -> item {
+                        Text("请先在「我的」里配置 Komga 服务器", color = Muted, fontSize = 13.sp)
                     }
-                    comics == null -> CircularProgressIndicator(color = Brand)
-                    comics!!.isEmpty() -> {
-                        Text("暂无漫画阅读历史", color = Muted, fontSize = 13.sp)
-                        Spacer(Modifier.height(6.dp))
-                        Text("服务端没有进行中或已读的书籍", color = Muted, fontSize = 12.sp)
-                    }
-                    else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        comics!!.forEach { item ->
-                            ComicHistoryRow(
-                                item = item,
-                                client = client,
-                                onClick = { onResumeComic(item) }
-                            )
+                    comicError != null -> item {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("漫画历史加载失败：$comicError", color = Danger, fontSize = 13.sp)
+                            TextButton(onClick = { comicReload++ }) { Text("重试", color = Brand) }
                         }
+                    }
+                    comics == null -> item {
+                        Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = Brand)
+                        }
+                    }
+                    comics!!.isEmpty() -> item {
+                        Column {
+                            Text("暂无漫画阅读历史", color = Muted, fontSize = 13.sp)
+                            Spacer(Modifier.height(6.dp))
+                            Text("服务端没有进行中或已读的书籍", color = Muted, fontSize = 12.sp)
+                        }
+                    }
+                    else -> items(comics!!, key = { it.id }) { item ->
+                        ComicHistoryRow(
+                            item = item,
+                            client = client,
+                            onClick = { onResumeComic(item) }
+                        )
                     }
                 }
             }
