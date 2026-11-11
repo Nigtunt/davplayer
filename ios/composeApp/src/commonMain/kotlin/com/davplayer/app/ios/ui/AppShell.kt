@@ -432,12 +432,15 @@ private fun HistoryTab(
                 .verticalScroll(rememberScrollState())
                 .padding(24.dp)
         ) {
-            Text("历史", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text("历史", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TextMain)
+            Text("视频播放与漫画阅读记录", fontSize = 11.sp, color = Muted)
             Spacer(Modifier.height(12.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HistoryChip("视频", selected = segment == 0) { segment = 0 }
-                HistoryChip("漫画", selected = segment == 1) { segment = 1 }
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).background(SurfaceHigh).padding(3.dp)
+            ) {
+                HistoryChip("视频", selected = segment == 0, modifier = Modifier.weight(1f)) { segment = 0 }
+                HistoryChip("漫画", selected = segment == 1, modifier = Modifier.weight(1f)) { segment = 1 }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -485,18 +488,25 @@ private fun HistoryTab(
 }
 
 @Composable
-private fun HistoryChip(text: String, selected: Boolean, onClick: () -> Unit) {
+private fun HistoryChip(
+    text: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
     Box(
-        Modifier
-            .background(if (selected) Brand else SurfaceHigh, RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 7.dp)
+        modifier
+            .height(34.dp)
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) SurfaceBg else Color.Transparent)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             text,
-            fontSize = 12.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-            color = if (selected) Color.White else Muted
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) Brand else Muted
         )
     }
 }

@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -50,6 +51,7 @@ import com.davplayer.app.ios.theme.Hairline
 import com.davplayer.app.ios.theme.Muted
 import com.davplayer.app.ios.theme.SurfaceBg
 import com.davplayer.app.ios.theme.SurfaceHigh
+import com.davplayer.app.ios.theme.TextMain
 
 /** 源列表 + 继续观看 */
 @Composable
@@ -77,13 +79,36 @@ fun SourceListScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Column(Modifier.widthIn(max = 760.dp).fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("DavPlayer", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = Brand)
-                        Spacer(Modifier.height(4.dp))
-                        Text("WebDAV 视频 · iPad", fontSize = 12.sp, color = Muted)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .shadow(3.dp, RoundedCornerShape(20.dp), ambientColor = Color(0x0A101828))
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(SurfaceBg)
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(Brush.linearGradient(listOf(Color(0xFF4F46E5), Color(0xFF818CF8)))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("D", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
-                    TextButton(onClick = onOpenSettings) { Text("设置", fontSize = 12.sp, color = Muted) }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("DavPlayer", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextMain)
+                        Text(
+                            "${sources.size} 个 WebDAV 源 · 本地媒体库",
+                            fontSize = 10.sp,
+                            color = Muted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    TextButton(onClick = onOpenSettings) { Text("设置", fontSize = 12.sp, color = Brand) }
                 }
 
                 Spacer(Modifier.height(18.dp))

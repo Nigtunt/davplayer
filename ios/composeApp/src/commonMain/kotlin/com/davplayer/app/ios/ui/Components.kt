@@ -24,6 +24,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,7 +62,11 @@ fun DavRow(
             .shadow(2.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x0A101828))
             .clip(RoundedCornerShape(16.dp))
             .background(if (selected) Brand.copy(alpha = 0.08f) else SurfaceBg)
-            .clickable(onClick = onClick)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -150,7 +156,11 @@ fun DavGridCard(
             .shadow(2.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x0A101828))
             .clip(RoundedCornerShape(16.dp))
             .background(if (selected) Brand.copy(alpha = 0.08f) else SurfaceBg)
-            .clickable(onClick = onClick)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
             .padding(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

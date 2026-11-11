@@ -45,10 +45,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -65,6 +69,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -94,6 +99,7 @@ import com.davplayer.app.ios.theme.Hairline
 import com.davplayer.app.ios.theme.Muted
 import com.davplayer.app.ios.theme.SurfaceBg
 import com.davplayer.app.ios.theme.SurfaceHigh
+import com.davplayer.app.ios.theme.TextMain
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -374,15 +380,16 @@ private fun KomgaHome(
         ) {
             if (onDeck.isNotEmpty()) {
                 item {
-                    SectionTitle("继续阅读")
+                    ComicSectionHeader("继续阅读", "${onDeck.size} 本在读")
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         lazyItems(onDeck, key = { it.id }) { book ->
-                            CoverCard(
-                                title = book.title,
-                                subtitle = if (book.pagesCount > 0) "第 ${book.readPage} / ${book.pagesCount} 页" else "",
+                            ContinueComicCard(
+                                title = book.seriesTitle.ifBlank { book.title },
+                                subtitle = book.title,
+                                pageText = if (book.pagesCount > 0) "${book.readPage}/${book.pagesCount}P" else "",
                                 fraction = if (book.pagesCount > 0) book.readPage.toFloat() / book.pagesCount else 0f,
                                 coverUrl = client.bookThumbUrl(book.id),
                                 auth = client.authHeader,
@@ -394,60 +401,47 @@ private fun KomgaHome(
             }
 
             if (latest.isNotEmpty()) {
-                item {
-                    SectionTitle("最新入库")
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                item { ComicSectionHeader("最新入库", "${latest.size} 个系列") }
+                lazyItems(latest.chunked(3), key = { row -> row.joinToString("|") { it.id } }) { row ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        lazyItems(latest, key = { it.id }) { series ->
-                            CoverCard(
+                        row.forEach { series ->
+                            ComicGridCard(
                                 title = series.title,
                                 subtitle = "${series.booksCount} 本",
-                                fraction = series.readProgress,
                                 coverUrl = client.seriesThumbUrl(series.id),
                                 auth = client.authHeader,
+                                modifier = Modifier.weight(1f),
                                 onClick = { onOpenSeries(series) }
                             )
                         }
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }
 
             item {
-                SectionTitle("书库")
+                ComicSectionHeader("书库", "Komga")
                 Column(
                     Modifier.padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     libraries.forEach { library ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(SurfaceBg, RoundedCornerShape(12.dp))
-                                .clickable { onOpenLibrary(library) }
-                                .padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("K", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                library.name.ifBlank { "书库" },
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text("›", fontSize = 18.sp, color = Muted)
-                        }
+                        LibraryCard(
+                            name = library.name.ifBlank { "书库" },
+                            onClick = { onOpenLibrary(library) }
+                        )
                     }
                     TextButton(onClick = onOpenAll) {
-                        Text("浏览全部系列 →", fontSize = 13.sp, color = Brand)
+                        Text("浏览全部系列 →", fontSize = 12.sp, color = Brand)
                     }
                 }
             }
 
             item {
-                SectionTitle("阅读列表")
+                ComicSectionHeader("阅读列表", "${readLists.size} 个")
                 if (readLists.isEmpty()) {
                     Text(
                         "暂无阅读列表（可在书籍详情里新建并添加）",
@@ -461,10 +455,9 @@ private fun KomgaHome(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         lazyItems(readLists, key = { it.id }) { list ->
-                            CoverCard(
+                            ReadListRailCard(
                                 title = list.name,
                                 subtitle = "${list.bookIds.size} 本",
-                                fraction = 0f,
                                 coverUrl = client.readListThumbUrl(list.id),
                                 auth = client.authHeader,
                                 onClick = { onOpenReadList(list) }
@@ -481,6 +474,170 @@ private fun KomgaHome(
                 ) { Text("刷新", fontSize = 12.sp, color = Muted) }
             }
         }
+    }
+}
+
+@Composable
+private fun ComicSectionHeader(title: String, trailing: String? = null) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.width(3.dp).height(14.dp).clip(RoundedCornerShape(2.dp)).background(Brand))
+        Spacer(Modifier.width(7.dp))
+        Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextMain)
+        trailing?.let {
+            Spacer(Modifier.weight(1f))
+            Text(it, fontSize = 10.sp, color = Muted)
+        }
+    }
+}
+
+@Composable
+private fun ContinueComicCard(
+    title: String,
+    subtitle: String,
+    pageText: String,
+    fraction: Float,
+    coverUrl: String,
+    auth: String,
+    onClick: () -> Unit
+) {
+    Column(Modifier.width(142.dp).clickable(onClick = onClick)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(3f / 4f)
+                .shadow(4.dp, RoundedCornerShape(14.dp), ambientColor = Color(0x14101828))
+                .clip(RoundedCornerShape(14.dp))
+        ) {
+            KomgaImage(
+                url = coverUrl,
+                auth = auth,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.55f)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.82f))
+                        )
+                    )
+            )
+            Column(
+                Modifier.align(Alignment.BottomStart).padding(10.dp)
+            ) {
+                Text(pageText, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.88f))
+                Spacer(Modifier.height(4.dp))
+                Box(
+                    Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = 0.3f))
+                ) {
+                    Box(
+                        Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).fillMaxHeight()
+                            .background(Brand)
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(7.dp))
+        Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = TextMain)
+        Text(subtitle, fontSize = 10.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun ComicGridCard(
+    title: String,
+    subtitle: String,
+    coverUrl: String,
+    auth: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Column(modifier.clickable(onClick = onClick)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(3f / 4f)
+                .shadow(3.dp, RoundedCornerShape(12.dp), ambientColor = Color(0x12101828))
+                .clip(RoundedCornerShape(12.dp))
+        ) {
+            KomgaImage(
+                url = coverUrl,
+                auth = auth,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            Box(
+                Modifier.fillMaxWidth().fillMaxHeight(0.35f).align(Alignment.BottomCenter)
+                    .background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f))
+                        )
+                    )
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = TextMain)
+        Text(subtitle, fontSize = 10.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun ReadListRailCard(
+    title: String,
+    subtitle: String,
+    coverUrl: String,
+    auth: String,
+    onClick: () -> Unit
+) {
+    Column(Modifier.width(132.dp).clickable(onClick = onClick)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(3f / 4f)
+                .shadow(3.dp, RoundedCornerShape(12.dp), ambientColor = Color(0x12101828))
+                .clip(RoundedCornerShape(12.dp))
+        ) {
+            KomgaImage(
+                url = coverUrl,
+                auth = auth,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = TextMain)
+        Text(subtitle, fontSize = 10.sp, color = Muted)
+    }
+}
+
+@Composable
+private fun LibraryCard(name: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .shadow(2.dp, RoundedCornerShape(14.dp), ambientColor = Color(0x0A101828))
+            .clip(RoundedCornerShape(14.dp))
+            .background(SurfaceBg)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Brand.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Default.Folder, null, tint = Brand, modifier = Modifier.size(19.dp))
+        }
+        Spacer(Modifier.width(11.dp))
+        Text(name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain, modifier = Modifier.weight(1f))
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Muted, modifier = Modifier.size(18.dp))
     }
 }
 
