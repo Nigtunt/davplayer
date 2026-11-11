@@ -74,7 +74,10 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.ViewList
@@ -953,35 +956,35 @@ private fun ModernBrowseHeader(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 46.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(11.dp))
                         .background(MaterialTheme.colorScheme.surface)
-                        .border(1.dp, extra.hairline, RoundedCornerShape(12.dp))
+                        .border(1.dp, extra.hairline, RoundedCornerShape(11.dp))
                         .clickable { sourceMenuOpen = true }
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                        .padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         Modifier
-                            .size(34.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                            .size(24.dp)
+                            .clip(RoundedCornerShape(7.dp))
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Default.Storage, null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(14.dp)
                         )
                     }
-                    Spacer(Modifier.width(9.dp))
+                    Spacer(Modifier.width(6.dp))
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(6.dp).clip(CircleShape).background(statusColor))
-                            Spacer(Modifier.width(5.dp))
+                            Box(Modifier.size(5.dp).clip(CircleShape).background(statusColor))
+                            Spacer(Modifier.width(4.dp))
                             Text(
                                 sourceName,
-                                fontSize = 15.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
@@ -990,7 +993,7 @@ private fun ModernBrowseHeader(
                         }
                         Text(
                             "WebDAV · $statusText",
-                            fontSize = 9.sp,
+                            fontSize = 8.sp,
                             color = extra.textMuted,
                             maxLines = 1
                         )
@@ -998,7 +1001,7 @@ private fun ModernBrowseHeader(
                     Icon(
                         Icons.Default.ArrowDropDown, "切换 WebDAV 库",
                         tint = extra.textMuted,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
                 DropdownMenu(
@@ -1024,7 +1027,11 @@ private fun ModernBrowseHeader(
                     onClick = onToggleView
                 )
                 HeaderIconButton(
-                    icon = Icons.Default.Sort,
+                    icon = when (sortLabel) {
+                        "大小" -> Icons.Default.FormatSize
+                        "时间" -> Icons.Default.Schedule
+                        else -> Icons.Default.SortByAlpha
+                    },
                     description = "排序：$sortLabel",
                     onClick = onSort
                 )

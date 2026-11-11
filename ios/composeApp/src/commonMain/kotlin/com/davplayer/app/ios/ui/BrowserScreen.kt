@@ -3,6 +3,7 @@ package com.davplayer.app.ios.ui
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
@@ -26,12 +27,24 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.SortByAlpha
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,8 +58,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
@@ -63,6 +79,7 @@ import com.davplayer.app.ios.data.DavSource
 import com.davplayer.app.ios.data.SourceStore
 import com.davplayer.app.ios.data.davParentPath
 import com.davplayer.app.ios.data.davTargetPath
+import com.davplayer.app.ios.data.isSubtitleFile
 import com.davplayer.app.ios.data.isVideoFile
 import com.davplayer.app.ios.data.percentDecode
 import com.davplayer.app.ios.player.PlayerBridge
@@ -75,6 +92,7 @@ import com.davplayer.app.ios.theme.Hairline
 import com.davplayer.app.ios.theme.Muted
 import com.davplayer.app.ios.theme.SurfaceBg
 import com.davplayer.app.ios.theme.SurfaceHigh
+import com.davplayer.app.ios.theme.TextMain
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -131,6 +149,9 @@ fun BrowserScreen(
     var playPending by remember { mutableStateOf(false) }
     var autoPlayedHref by remember { mutableStateOf<String?>(null) }
     var reloadTick by remember { mutableStateOf(0) }
+    var filter by remember { mutableStateOf(BrowseFilter.All) }
+    var gridView by remember { mutableStateOf(false) }
+    var sortMode by remember { mutableStateOf(BrowseSort.Name) }
     val scope = rememberCoroutineScope()
 
     // 文件操作：右滑显示删除/移动，移动目标目录会记住上次位置
@@ -164,8 +185,10 @@ fun BrowserScreen(
         loading = true
         error = null
         try {
-            // 和 Android 版一致：只显示文件夹和视频
-            entries = client.list(path).filter { it.isDir || isVideoFile(it.name) }
+            // 和 Android 版一致：文件夹、视频、字幕
+            entries = client.list(path).filter {
+                it.isDir || isVideoFile(it.name) || isSubtitleFile(it.name)
+            }
         } catch (e: Exception) {
             error = e.message ?: "加载失败"
             AppLog.error("WebDAV", error!!)
@@ -183,6 +206,22 @@ fun BrowserScreen(
         }
     }
     val onRetry: () -> Unit = { reloadTick++ }
+    val folders = sortDavEntries(entries.orEmpty().filter { it.isDir }, sortMode)
+    val allFiles = sortDavEntries(entries.orEmpty().filterNot { it.isDir }, sortMode)
+    val videos = allFiles.filter { isVideoFile(it.name) }
+    val subtitles = allFiles.filter { isSubtitleFile(it.name) }
+    val counts = mapOf(
+        BrowseFilter.All to folders.size + allFiles.size,
+        BrowseFilter.Folder to folders.size,
+        BrowseFilter.Video to videos.size,
+        BrowseFilter.Subtitle to subtitles.size
+    )
+    val filteredFiles = when (filter) {
+        BrowseFilter.All -> allFiles
+        BrowseFilter.Folder -> emptyList()
+        BrowseFilter.Video -> videos
+        BrowseFilter.Subtitle -> subtitles
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
         val wide = maxWidth >= WideBreakpoint
@@ -233,6 +272,8 @@ fun BrowserScreen(
             if (entry.isDir) {
                 stack = stack + (if (entry.href.endsWith("/")) entry.href else entry.href + "/")
                 selected = null
+            } else if (isSubtitleFile(entry.name)) {
+                selected = entry
             } else {
                 selected = entry
                 startPlay(entry)
@@ -242,21 +283,40 @@ fun BrowserScreen(
         if (wide) {
             // iPad / 横屏：左侧目录树固定 380，右侧详情/播放区
             Row(Modifier.fillMaxSize()) {
-                Column(Modifier.width(380.dp).fillMaxHeight().background(SurfaceBg)) {
-                    SidebarHeader(
+                Column(Modifier.width(380.dp).fillMaxHeight().background(Bg)) {
+                    BrowseHeader(
                         source = source,
                         sources = SourceStore.sources,
                         onSwitchSource = onSwitchSource,
-                        pathText = path,
                         canGoUp = stack.size > 1,
                         onUp = onUp,
                         onRefresh = onRetry,
                         onExit = onExit,
-                        onOpenSettings = onOpenSettings
+                        onOpenSettings = onOpenSettings,
+                        gridView = gridView,
+                        onToggleGrid = { gridView = !gridView },
+                        sort = sortMode,
+                        onSort = {
+                            sortMode = BrowseSort.entries[(sortMode.ordinal + 1) % BrowseSort.entries.size]
+                        },
+                        stack = stack,
+                        onCrumb = { target ->
+                            val index = stack.indexOf(target)
+                            if (index >= 0) {
+                                stack = stack.take(index + 1)
+                                selected = null
+                            }
+                        },
+                        filter = filter,
+                        onFilter = { filter = it },
+                        counts = counts
                     )
                     HorizontalDivider(color = Hairline, thickness = 1.dp)
                     DirectoryList(
-                        entries = entries,
+                        folders = folders,
+                        files = filteredFiles,
+                        filter = filter,
+                        gridView = gridView,
                         loading = loading,
                         error = error,
                         selectedHref = selected?.href,
@@ -264,7 +324,7 @@ fun BrowserScreen(
                         onOpen = openEntry,
                         onDelete = { deleteTarget = it },
                         onMove = { moveTarget = it },
-                        rowBackground = SurfaceBg,
+                        rowBackground = Bg,
                         state = listState,
                         modifier = Modifier.weight(1f)
                     )
@@ -279,20 +339,39 @@ fun BrowserScreen(
         } else {
             // 手机 / 窄窗口：单列目录，播放器以 overlay 盖在上面
             Column(Modifier.fillMaxSize()) {
-                PhoneTopBar(
+                BrowseHeader(
                     source = source,
                     sources = SourceStore.sources,
                     onSwitchSource = onSwitchSource,
-                    subtitle = path,
                     canGoUp = stack.size > 1,
                     onUp = onUp,
                     onRefresh = onRetry,
                     onExit = onExit,
-                    onOpenSettings = onOpenSettings
+                    onOpenSettings = onOpenSettings,
+                    gridView = gridView,
+                    onToggleGrid = { gridView = !gridView },
+                    sort = sortMode,
+                    onSort = {
+                        sortMode = BrowseSort.entries[(sortMode.ordinal + 1) % BrowseSort.entries.size]
+                    },
+                    stack = stack,
+                    onCrumb = { target ->
+                        val index = stack.indexOf(target)
+                        if (index >= 0) {
+                            stack = stack.take(index + 1)
+                            selected = null
+                        }
+                    },
+                    filter = filter,
+                    onFilter = { filter = it },
+                    counts = counts
                 )
                 HorizontalDivider(color = Hairline, thickness = 1.dp)
                 DirectoryList(
-                    entries = entries,
+                    folders = folders,
+                    files = filteredFiles,
+                    filter = filter,
+                    gridView = gridView,
                     loading = loading,
                     error = error,
                     selectedHref = selected?.href,
@@ -433,7 +512,10 @@ fun BrowserScreen(
 
 @Composable
 private fun DirectoryList(
-    entries: List<DavEntry>?,
+    folders: List<DavEntry>,
+    files: List<DavEntry>,
+    filter: BrowseFilter,
+    gridView: Boolean,
     loading: Boolean,
     error: String?,
     selectedHref: String?,
@@ -445,22 +527,95 @@ private fun DirectoryList(
     state: LazyListState,
     modifier: Modifier = Modifier
 ) {
+    val hasFolders = (filter == BrowseFilter.All || filter == BrowseFilter.Folder) && folders.isNotEmpty()
+    val hasFiles = filter != BrowseFilter.Folder && files.isNotEmpty()
     when {
         loading -> LoadingState(modifier)
         error != null -> ErrorState(error, onRetry, modifier)
-        entries.isNullOrEmpty() -> EmptyState("空目录", modifier)
+        !hasFolders && !hasFiles -> EmptyState("没有匹配内容", modifier)
         else -> LazyColumn(state = state, modifier = modifier) {
-            items(entries.orEmpty(), key = { it.href }) { entry ->
-                SwipeableDavRow(
-                    entry = entry,
-                    selected = entry.href == selectedHref,
-                    rowBackground = rowBackground,
-                    onClick = { onOpen(entry) },
-                    onDelete = { onDelete(entry) },
-                    onMove = { onMove(entry) }
-                )
+            if (filter == BrowseFilter.All || filter == BrowseFilter.Folder) {
+                item { BrowseSectionTitle("文件夹", folders.size) }
+                if (gridView) {
+                    items(folders.chunked(2), key = { row -> row.joinToString("|") { it.href } }) { row ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            row.forEach { entry ->
+                                DavGridCard(
+                                    entry = entry,
+                                    selected = entry.href == selectedHref,
+                                    onClick = { onOpen(entry) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (row.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                } else {
+                    items(folders, key = { it.href }) { entry ->
+                        DavRow(entry, entry.href == selectedHref) { onOpen(entry) }
+                    }
+                }
+            }
+
+            if (filter != BrowseFilter.Folder && files.isNotEmpty()) {
+                item {
+                    BrowseSectionTitle(
+                        when (filter) {
+                            BrowseFilter.Video -> "视频"
+                            BrowseFilter.Subtitle -> "字幕"
+                            else -> "文件"
+                        },
+                        files.size
+                    )
+                }
+                if (gridView) {
+                    items(files.chunked(2), key = { row -> row.joinToString("|") { it.href } }) { row ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            row.forEach { entry ->
+                                DavGridCard(
+                                    entry = entry,
+                                    selected = entry.href == selectedHref,
+                                    onClick = { onOpen(entry) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (row.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                } else {
+                    items(files, key = { it.href }) { entry ->
+                        SwipeableDavRow(
+                            entry = entry,
+                            selected = entry.href == selectedHref,
+                            rowBackground = rowBackground,
+                            onClick = { onOpen(entry) },
+                            onDelete = { onDelete(entry) },
+                            onMove = { onMove(entry) }
+                        )
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun BrowseSectionTitle(title: String, count: Int) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.width(3.dp).height(14.dp).background(Brand, RoundedCornerShape(2.dp)))
+        Spacer(Modifier.width(7.dp))
+        Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextMain)
+        Spacer(Modifier.width(5.dp))
+        Text("$count", fontSize = 10.sp, color = Muted)
     }
 }
 
@@ -861,6 +1016,213 @@ private fun SubtitlePickerDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
+}
+
+private enum class BrowseFilter(val label: String) {
+    All("全部"), Folder("文件夹"), Video("视频"), Subtitle("字幕")
+}
+
+private enum class BrowseSort(val label: String) {
+    Name("名称"), Size("大小"), Modified("时间")
+}
+
+private fun sortDavEntries(list: List<DavEntry>, sort: BrowseSort): List<DavEntry> = when (sort) {
+    BrowseSort.Size -> list.sortedByDescending { it.size }
+    BrowseSort.Modified -> list.sortedByDescending { it.lastModified }
+    BrowseSort.Name -> list.sortedBy { it.name.lowercase() }
+}
+
+@Composable
+private fun BrowseHeader(
+    source: DavSource,
+    sources: List<DavSource>,
+    onSwitchSource: (DavSource) -> Unit,
+    canGoUp: Boolean,
+    onUp: () -> Unit,
+    onRefresh: () -> Unit,
+    onExit: () -> Unit,
+    onOpenSettings: () -> Unit,
+    gridView: Boolean,
+    onToggleGrid: () -> Unit,
+    sort: BrowseSort,
+    onSort: () -> Unit,
+    stack: List<String>,
+    onCrumb: (String) -> Unit,
+    filter: BrowseFilter,
+    onFilter: (BrowseFilter) -> Unit,
+    counts: Map<BrowseFilter, Int>
+) {
+    Column(Modifier.fillMaxWidth().background(Bg)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 10.dp, top = 8.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HeaderCircle(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                label = "上级目录",
+                enabled = canGoUp,
+                onClick = onUp
+            )
+            Spacer(Modifier.width(7.dp))
+            SourcePill(
+                source = source,
+                sources = sources,
+                onSwitchSource = onSwitchSource,
+                onExit = onExit,
+                onOpenSettings = onOpenSettings,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(5.dp))
+            HeaderCircle(
+                icon = if (gridView) Icons.Default.ViewList else Icons.Default.GridView,
+                label = if (gridView) "列表" else "图标",
+                onClick = onToggleGrid
+            )
+            Spacer(Modifier.width(4.dp))
+            HeaderCircle(
+                icon = when (sort) {
+                    BrowseSort.Name -> Icons.Default.SortByAlpha
+                    BrowseSort.Size -> Icons.Default.FormatSize
+                    BrowseSort.Modified -> Icons.Default.Schedule
+                },
+                label = "排序：${sort.label}",
+                onClick = onSort
+            )
+            Spacer(Modifier.width(4.dp))
+            HeaderCircle(Icons.Default.Refresh, "刷新", onClick = onRefresh)
+        }
+
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            stack.forEachIndexed { index, item ->
+                val active = index == stack.lastIndex
+                Text(
+                    if (index == 0) "根目录" else decodeName(item),
+                    fontSize = 10.sp,
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                    color = if (active) Brand else Muted,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (active) Brand.copy(alpha = 0.10f) else SurfaceBg)
+                        .clickable { onCrumb(item) }
+                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                )
+                if (index < stack.lastIndex) Text("›", fontSize = 11.sp, color = Muted)
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            BrowseFilter.entries.forEach { item ->
+                Text(
+                    "${item.label} ${counts[item] ?: 0}",
+                    fontSize = 11.sp,
+                    fontWeight = if (filter == item) FontWeight.Bold else FontWeight.Medium,
+                    color = if (filter == item) Color.White else TextMain,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(if (filter == item) Brand else SurfaceHigh)
+                        .clickable { onFilter(item) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeaderCircle(
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Box(
+        Modifier
+            .size(36.dp)
+            .shadow(2.dp, RoundedCornerShape(50), ambientColor = Color(0x0A101828))
+            .clip(RoundedCornerShape(50))
+            .background(SurfaceBg)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, label, tint = if (enabled) TextMain else Muted.copy(alpha = 0.4f), modifier = Modifier.size(18.dp))
+    }
+}
+
+@Composable
+private fun SourcePill(
+    source: DavSource,
+    sources: List<DavSource>,
+    onSwitchSource: (DavSource) -> Unit,
+    onExit: () -> Unit,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(SurfaceBg)
+                .border(1.dp, Hairline, RoundedCornerShape(11.dp))
+                .clickable { expanded = true }
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier.size(24.dp).clip(RoundedCornerShape(7.dp)).background(Brand.copy(alpha = 0.10f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Storage, null, tint = Brand, modifier = Modifier.size(14.dp))
+            }
+            Spacer(Modifier.width(6.dp))
+            Text(
+                source.name,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextMain,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(Icons.Default.ArrowDropDown, "切换源", tint = Muted, modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            sources.forEach { item ->
+                DropdownMenuItem(
+                    text = { Text(if (item.id == source.id) "✓ ${item.name}" else item.name, fontSize = 13.sp) },
+                    onClick = {
+                        expanded = false
+                        onSwitchSource(item)
+                    }
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("源管理", fontSize = 13.sp) },
+                onClick = {
+                    expanded = false
+                    onExit()
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("设置", fontSize = 13.sp) },
+                onClick = {
+                    expanded = false
+                    onOpenSettings()
+                }
+            )
+        }
+    }
 }
 
 @Composable

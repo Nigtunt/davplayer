@@ -15,7 +15,8 @@ data class DavEntry(
     val name: String,
     val href: String,
     val isDir: Boolean,
-    val size: Long
+    val size: Long,
+    val lastModified: String = ""
 )
 
 /**
@@ -58,6 +59,7 @@ class DavClient(baseUrl: String, private val user: String, private val pass: Str
         val body = """<?xml version="1.0" encoding="utf-8" ?>""" +
                 """<D:propfind xmlns:D="DAV:"><D:prop>""" +
                 """<D:displayname/><D:resourcetype/><D:getcontentlength/>""" +
+                """<D:getlastmodified/>""" +
                 """</D:prop></D:propfind>"""
 
         val response = http.request(url(path)) {
@@ -151,7 +153,8 @@ internal fun parseMultiStatus(xml: String, requestedPath: String): List<DavEntry
             // 部分 WebDAV 服务端（如 AList/OpenList 的某些存储）不返回 <collection/>，
             // 但目录 href 一定以 "/" 结尾，用这个兜底
             isDir = collectionRegex.containsMatchIn(block) || href.endsWith("/"),
-            size = tagText(block, "getcontentlength")?.trim()?.toLongOrNull() ?: 0L
+            size = tagText(block, "getcontentlength")?.trim()?.toLongOrNull() ?: 0L,
+            lastModified = tagText(block, "getlastmodified")?.trim().orEmpty()
         )
     }
         .sortedWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
@@ -175,6 +178,23 @@ val VIDEO_EXTS = setOf(
 
 fun isVideoFile(name: String): Boolean =
     name.substringAfterLast('.', "").lowercase() in VIDEO_EXTS
+
+val SUBTITLE_EXTS = setOf("srt", "ass", "ssa", "vtt")
+
+fun isSubtitleFile(name: String): Boolean =
+    name.substringAfterLast('.', "").lowercase() in SUBTITLE_EXTS
+
+fun formatDavModified(raw: String): String? {
+    if (raw.isBlank()) return null
+    val m = Regex("""(\d{2})\s+(\w{3})\s+(\d{4})\s+(\d{2}):(\d{2})""").find(raw) ?: return null
+    val month = when (m.groupValues[2].lowercase()) {
+        "jan" -> "01"; "feb" -> "02"; "mar" -> "03"; "apr" -> "04"
+        "may" -> "05"; "jun" -> "06"; "jul" -> "07"; "aug" -> "08"
+        "sep" -> "09"; "oct" -> "10"; "nov" -> "11"; "dec" -> "12"
+        else -> return null
+    }
+    return "${m.groupValues[1]}-$month ${m.groupValues[4]}:${m.groupValues[5]}"
+}
 
 /** 文件所在目录，保证以 / 结尾 */
 fun davParentPath(href: String): String {
