@@ -383,7 +383,9 @@ fun BrowserScreen(
                     state = listState,
                     modifier = Modifier.weight(1f)
                 )
-                selected?.let { BottomHint(it, onPlay = { startPlay(it) }) }
+                selected?.takeIf { !isSubtitleFile(it.name) }?.let {
+                    BottomHint(it, onPlay = { startPlay(it) })
+                }
             }
         }
 
@@ -926,10 +928,11 @@ private fun DetailPane(entry: DavEntry?, onPlay: () -> Unit, modifier: Modifier 
             Spacer(Modifier.height(6.dp))
             Text("目录会显示在左边，文件详情显示在这里", color = Muted, fontSize = 12.sp)
         } else {
+            val subtitle = isSubtitleFile(entry.name)
             Box(
                 Modifier.size(120.dp).background(SurfaceHigh, RoundedCornerShape(18.dp)),
                 contentAlignment = Alignment.Center
-            ) { Text("视频", fontSize = 16.sp, color = Muted) }
+            ) { Text(if (subtitle) "字幕" else "视频", fontSize = 16.sp, color = Muted) }
 
             Spacer(Modifier.height(22.dp))
             Text(
@@ -951,9 +954,11 @@ private fun DetailPane(entry: DavEntry?, onPlay: () -> Unit, modifier: Modifier 
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(26.dp))
-            Button(onClick = onPlay, shape = RoundedCornerShape(999.dp)) {
-                Text("播放")
+            if (!subtitle) {
+                Spacer(Modifier.height(26.dp))
+                Button(onClick = onPlay, shape = RoundedCornerShape(999.dp)) {
+                    Text("播放")
+                }
             }
         }
     }
