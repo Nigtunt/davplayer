@@ -995,7 +995,8 @@ fun logTrackInfo(tracks: Tracks) {
             val f = group.getTrackFormat(i)
             if (sb.isNotEmpty()) sb.append("  ")
             sb.append(
-                "[$type ${f.sampleMimeType ?: "-"} ${f.language ?: "-"} " +
+                "[$type ${f.sampleMimeType ?: "-"} codec=${f.codecs ?: "-"} " +
+                        "${f.width}x${f.height} bitrate=${f.bitrate} ${f.language ?: "-"} " +
                         "sup=${group.isTrackSupported(i)} sel=${group.isTrackSelected(i)}]"
             )
         }

@@ -8,3 +8,9 @@ expect fun writeFileBytes(path: String, bytes: ByteArray): Boolean
 
 /** 图片磁盘缓存目录 */
 expect fun imageCacheDir(): String?
+
+/** 图片磁盘缓存总字节数 */
+expect fun imageCacheSizeBytes(): Long
+
+/** 清空图片磁盘缓存 */
+expect fun clearImageCache(): Boolean

@@ -9,6 +9,8 @@ import kotlinx.cinterop.usePinned
 import platform.Foundation.NSCachesDirectory
 import platform.Foundation.NSData
 import platform.Foundation.NSFileManager
+import platform.Foundation.NSFileSize
+import platform.Foundation.NSNumber
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSUserDomainMask
 import platform.Foundation.dataWithBytes
@@ -48,4 +50,29 @@ actual fun imageCacheDir(): String? {
         error = null
     )
     return dir
+}
+
+@OptIn(ExperimentalForeignApi::class)
+actual fun imageCacheSizeBytes(): Long {
+    val dir = imageCacheDir() ?: return 0L
+    val fm = NSFileManager.defaultManager
+    val names = fm.contentsOfDirectoryAtPath(dir, error = null) ?: return 0L
+    return names.sumOf { raw ->
+        val name = raw as? String ?: return@sumOf 0L
+        val attrs = fm.attributesOfItemAtPath("$dir/$name", error = null)
+        (attrs?.get(NSFileSize) as? NSNumber)?.longLongValue ?: 0L
+    }
+}
+
+@OptIn(ExperimentalForeignApi::class)
+actual fun clearImageCache(): Boolean {
+    val dir = imageCacheDir() ?: return false
+    val fm = NSFileManager.defaultManager
+    val names = fm.contentsOfDirectoryAtPath(dir, error = null) ?: return false
+    var ok = true
+    names.forEach { raw ->
+        val name = raw as? String ?: return@forEach
+        if (!fm.removeItemAtPath("$dir/$name", error = null)) ok = false
+    }
+    return ok
 }

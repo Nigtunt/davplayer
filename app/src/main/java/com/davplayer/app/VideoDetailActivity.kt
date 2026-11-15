@@ -81,6 +81,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -88,10 +89,15 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -123,6 +129,7 @@ class VideoDetailActivity : ComponentActivity() {
     private val embeddedGroups = mutableStateOf<List<Tracks.Group>>(emptyList())
     private val subtitleHref = mutableStateOf<String?>(null)
     private val subtitleName = mutableStateOf<String?>(null)
+    private val playbackError = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -162,7 +169,22 @@ class VideoDetailActivity : ComponentActivity() {
                 .setUri(videoUrl)
                 .apply { if (sub != null) setSubtitleConfigurations(listOf(sub)) }
                 .build()
-            ExoPlayer.Builder(this)
+            val preferSoftware = settings.decodeMode == "sw" || looksLike10Bit(title)
+            AppLog.log(
+                "PLAYER",
+                "init codecMode=${settings.decodeMode} preferSoftware=$preferSoftware title=$title"
+            )
+            val renderersFactory = DefaultRenderersFactory(this).apply {
+                setEnableDecoderFallback(true)
+                if (preferSoftware) {
+                    setMediaCodecSelector { mimeType, secure, tunneling ->
+                        MediaCodecSelector.DEFAULT
+                            .getDecoderInfos(mimeType, secure, tunneling)
+                            .sortedByDescending { it.softwareOnly }
+                    }
+                }
+            }
+            ExoPlayer.Builder(this, renderersFactory)
                 .setLoadControl(
                     DefaultLoadControl.Builder()
                         .setBufferDurationsMs(10_000, 45_000, 1_500, 3_000)
@@ -198,6 +220,62 @@ class VideoDetailActivity : ComponentActivity() {
                                 this@VideoDetailActivity.saveHistory()
                             }
                         }
+
+                        override fun onPlayerError(error: PlaybackException) {
+                            playingError(error)
+                        }
+                    })
+                    addAnalyticsListener(object : AnalyticsListener {
+                        override fun onTracksChanged(
+                            eventTime: AnalyticsListener.EventTime,
+                            tracks: Tracks
+                        ) {
+                            logTrackInfo(tracks)
+                        }
+
+                        override fun onVideoDecoderInitialized(
+                            eventTime: AnalyticsListener.EventTime,
+                            decoderName: String,
+                            initializedTimestampMs: Long,
+                            initializationDurationMs: Long
+                        ) {
+                            AppLog.log(
+                                "CODEC",
+                                "video decoder=$decoderName init=${initializationDurationMs}ms"
+                            )
+                        }
+
+                        override fun onVideoInputFormatChanged(
+                            eventTime: AnalyticsListener.EventTime,
+                            format: Format,
+                            decoderReuseEvaluation: DecoderReuseEvaluation?
+                        ) {
+                            AppLog.log(
+                                "VIDEO",
+                                "codec=${format.codecs ?: "-"} ${format.width}x${format.height} " +
+                                    "bitrate=${format.bitrate} profile=${format.codecs}"
+                            )
+                        }
+
+                        override fun onVideoCodecError(
+                            eventTime: AnalyticsListener.EventTime,
+                            error: Exception
+                        ) {
+                            AppLog.log(
+                                "CODEC",
+                                "video codec error ${error.javaClass.simpleName}: ${error.message}"
+                            )
+                        }
+
+                        override fun onPlayerError(
+                            eventTime: AnalyticsListener.EventTime,
+                            error: PlaybackException
+                        ) {
+                            AppLog.log(
+                                "PLAYER",
+                                "analytic error ${error.errorCodeName}: ${error.message}; cause=${error.cause?.javaClass?.simpleName}: ${error.cause?.message}"
+                            )
+                        }
                     })
                     setMediaItem(item)
                     prepare()
@@ -230,7 +308,7 @@ class VideoDetailActivity : ComponentActivity() {
                         unsupported -> unsupportedMessage(title.ifBlank { href })
                         exo == null -> "播放器初始化失败"
                         else -> null
-                    },
+                    } ?: playbackError.value,
                     client = davClient,
                     embedded = embeddedGroups.value,
                     subtitlesEnabled = embeddedGroups.value.any { it.isSelected } || subtitleHref.value != null,
@@ -260,6 +338,21 @@ class VideoDetailActivity : ComponentActivity() {
                     }
                 )
             }
+        }
+    }
+
+    private fun playingError(error: PlaybackException) {
+        AppLog.log(
+            "PLAYER",
+            "播放失败 ${error.errorCodeName}: ${error.message}; " +
+                "cause=${error.cause?.javaClass?.simpleName}: ${error.cause?.message}"
+        )
+        val base = describePlaybackError(error)
+        playbackError.value = if (looksLike10Bit(videoTitle)) {
+            "$base\n\n检测到 10bit H.264（Hi10P）。内置播放器已尝试软件解码；若设备没有可用软件解码器，" +
+                "请点右上角「外部播放」用 VLC 等播放器打开。"
+        } else {
+            base
         }
     }
 
@@ -304,6 +397,7 @@ class VideoDetailActivity : ComponentActivity() {
     private fun loadSubtitle(entry: DavEntry) {
         val exo = player ?: return
         val client = davClient ?: return
+        playbackError.value = null
         val wasPlaying = exo.isPlaying
         val position = exo.currentPosition.coerceAtLeast(0)
         val sub = MediaItem.SubtitleConfiguration.Builder(
@@ -443,7 +537,18 @@ private fun VideoDetailScreen(
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                Text(error ?: "无法播放", color = Color.White, modifier = Modifier.align(Alignment.Center))
+                Column(
+                    Modifier.align(Alignment.Center).padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(error ?: "无法播放", color = Color.White)
+                    if (client != null) {
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = externalPlay) {
+                            Text("用外部播放器打开", color = Color.White)
+                        }
+                    }
+                }
             }
         }
     } else {
@@ -470,12 +575,22 @@ private fun VideoDetailScreen(
                         .background(Brush.linearGradient(listOf(Color(0xFF111827), Color(0xFF25314C)))),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        error ?: "无法播放",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(24.dp)
-                    )
+                    Column(
+                        Modifier.padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            error ?: "无法播放",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 12.sp
+                        )
+                        if (client != null) {
+                            Spacer(Modifier.height(8.dp))
+                            TextButton(onClick = externalPlay) {
+                                Text("用外部播放器打开", color = Color.White)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -743,6 +858,11 @@ private fun InlineVideoPlayer(
                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                     setBackgroundColor(android.graphics.Color.BLACK)
+                    subtitleView?.apply {
+                        setApplyEmbeddedStyles(true)
+                        setApplyEmbeddedFontSizes(true)
+                        setStyle(CaptionStyleCompat.DEFAULT)
+                    }
                 }
             },
             update = { view ->
@@ -1072,6 +1192,11 @@ private fun DetailCard(content: @Composable ColumnScope.() -> Unit) {
             .padding(13.dp),
         content = content
     )
+}
+
+private fun looksLike10Bit(name: String): Boolean {
+    val lower = name.lowercase()
+    return "10bit" in lower || "10-bit" in lower || "10 bit" in lower || "hi10p" in lower
 }
 
 private fun prettyDavPath(href: String): String =

@@ -94,6 +94,15 @@ object KomgaImages {
         val loaded = load(url, auth, maxWidth) ?: return
         cachePut(key, loaded)
     }
+
+    suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.Default) {
+        imageCacheSizeBytes()
+    }
+
+    suspend fun clearCache() {
+        imageCache.clear()
+        withContext(Dispatchers.Default) { clearImageCache() }
+    }
 }
 
 @Composable

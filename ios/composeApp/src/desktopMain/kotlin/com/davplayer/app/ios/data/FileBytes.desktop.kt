@@ -20,3 +20,14 @@ actual fun imageCacheDir(): String? =
     File(System.getProperty("java.io.tmpdir"), "davplayer-images")
         .apply { mkdirs() }
         .absolutePath
+
+actual fun imageCacheSizeBytes(): Long =
+    imageCacheDir()?.let { dir ->
+        File(dir).listFiles()?.sumOf { it.length() } ?: 0L
+    } ?: 0L
+
+actual fun clearImageCache(): Boolean = runCatching {
+    val dir = imageCacheDir() ?: return false
+    File(dir).listFiles()?.forEach { it.delete() }
+    true
+}.getOrDefault(false)

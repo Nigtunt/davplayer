@@ -40,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +56,7 @@ import com.davplayer.app.ios.data.DavSource
 import com.davplayer.app.ios.data.KomgaBook
 import com.davplayer.app.ios.data.KomgaClient
 import com.davplayer.app.ios.data.KomgaImage
+import com.davplayer.app.ios.data.KomgaImages
 import com.davplayer.app.ios.data.PlayProgress
 import com.davplayer.app.ios.data.SourceStore
 import com.davplayer.app.ios.theme.Bg
@@ -65,6 +67,7 @@ import com.davplayer.app.ios.theme.Muted
 import com.davplayer.app.ios.theme.SurfaceBg
 import com.davplayer.app.ios.theme.SurfaceHigh
 import com.davplayer.app.ios.theme.TextMain
+import kotlinx.coroutines.launch
 
 /** 与 Android 端一致的四个顶层入口 */
 enum class AppTab(val label: String, val icon: ImageVector) {
@@ -352,6 +355,8 @@ private fun SettingsTab(
             onOpenSettings = onOpenPrivacy,
             headerContent = {
                 ThemeModeCard(themeMode, onThemeChange)
+                Spacer(Modifier.height(10.dp))
+                ImageCacheCard()
                 Spacer(Modifier.height(18.dp))
             },
             footer = {
@@ -382,6 +387,57 @@ private fun ThemeModeCard(themeMode: String, onChange: (String) -> Unit) {
             ThemeChoice("浅色", "light", themeMode, onChange)
             ThemeChoice("深色", "dark", themeMode, onChange)
         }
+    }
+}
+
+@Composable
+private fun ImageCacheCard() {
+    var size by remember { mutableStateOf<Long?>(null) }
+    var clearing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        size = KomgaImages.cacheSizeBytes()
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(SurfaceBg, RoundedCornerShape(12.dp))
+            .padding(14.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("图片缓存", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextMain)
+                Text("Komga 封面与漫画页", fontSize = 11.sp, color = Muted)
+            }
+            TextButton(
+                enabled = !clearing && (size ?: 0L) > 0L,
+                onClick = {
+                    clearing = true
+                    scope.launch {
+                        KomgaImages.clearCache()
+                        size = KomgaImages.cacheSizeBytes()
+                        clearing = false
+                    }
+                }
+            ) {
+                Text(
+                    if (clearing) "清理中…" else "清理",
+                    fontSize = 12.sp,
+                    color = if ((size ?: 0L) > 0L) Brand else Muted
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            when {
+                size == null -> "正在计算…"
+                size == 0L -> "暂无缓存"
+                else -> formatSize(size!!)
+            },
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = TextMain
+        )
     }
 }
 
