@@ -72,6 +72,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.FormatSize
@@ -475,14 +476,13 @@ fun BrowseScreen(
         if (stack.size > 1) stack.removeAt(stack.size - 1)
     }
 
-    val allSupported = entries.orEmpty()
-        .filter { it.isDir || isVideoFile(it.name) || isSubtitleFile(it.name) }
-    val sortedFiles = sortDavEntries(allSupported.filterNot { it.isDir }, sortMode)
-    val folders = sortDavEntries(allSupported.filter { it.isDir }, "name")
+    val visibleEntries = entries.orEmpty()
+    val sortedFiles = sortDavEntries(visibleEntries.filterNot { it.isDir }, sortMode)
+    val folders = sortDavEntries(visibleEntries.filter { it.isDir }, "name")
     val videos = sortedFiles.filter { isVideoFile(it.name) }
     val subtitles = sortedFiles.filter { isSubtitleFile(it.name) }
     val counts = mapOf(
-        BrowseFilter.All to allSupported.size,
+        BrowseFilter.All to visibleEntries.size,
         BrowseFilter.Folder to folders.size,
         BrowseFilter.Video to videos.size,
         BrowseFilter.Subtitle to subtitles.size
@@ -522,8 +522,11 @@ fun BrowseScreen(
                     lastModified = entry.lastModified
                 )
             }
-        } else {
+        } else if (isSubtitleFile(entry.name)) {
             actionTarget = entry
+        } else {
+            val ext = entry.name.substringAfterLast('.', "").uppercase().ifBlank { "未知格式" }
+            Toast.makeText(ctx, "$ext 文件暂不支持打开", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -576,7 +579,7 @@ fun BrowseScreen(
                     Button(onClick = { refreshTick++ }) { Text("重试") }
                 }
             }
-            allSupported.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            visibleEntries.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("空目录", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
             }
             folders.isEmpty() && filesForFilter.isEmpty() -> Box(
@@ -1171,11 +1174,13 @@ private fun BrowseRow(
     onMore: () -> Unit
 ) {
     val extra = davExtra()
+    val isVideo = isVideoFile(entry.name)
     val isSubtitle = isSubtitleFile(entry.name)
-    val meta = if (isVideoFile(entry.name)) parseVideoMeta(entry.name) else VideoMeta()
-    val unsupported = isVideoFile(entry.name) && isUnsupportedVideo(entry.name)
-    val coverWidth = if (isSubtitle) 52.dp else 96.dp
-    val coverHeight = if (isSubtitle) 52.dp else 58.dp
+    val isOther = !isVideo && !isSubtitle
+    val meta = if (isVideo) parseVideoMeta(entry.name) else VideoMeta()
+    val coverWidth = 96.dp
+    val coverHeight = 58.dp
+    val contentHeight = 64.dp
 
     Row(
         Modifier
@@ -1193,17 +1198,29 @@ private fun BrowseRow(
                 .size(coverWidth, coverHeight)
                 .clip(RoundedCornerShape(12.dp))
                 .background(
-                    if (isSubtitle) MaterialTheme.colorScheme.primaryContainer
+                    if (isSubtitle || isOther) MaterialTheme.colorScheme.primaryContainer
                     else MaterialTheme.colorScheme.surfaceContainer
                 ),
             contentAlignment = Alignment.Center
         ) {
-            if (isSubtitle) {
-                Icon(
-                    Icons.Default.Subtitles, null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(26.dp)
-                )
+            if (isSubtitle || isOther) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        if (isSubtitle) Icons.Default.Subtitles else Icons.Default.InsertDriveFile,
+                        null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    if (isOther) {
+                        Text(
+                            entry.name.substringAfterLast('.', "").uppercase().ifBlank { "FILE" },
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1
+                        )
+                    }
+                }
             } else {
                 FileCover(historyStore, entry.href, resumeTick, Modifier.fillMaxSize())
                 meta.labels.firstOrNull()?.let { label ->
@@ -1240,11 +1257,11 @@ private fun BrowseRow(
 
         Spacer(Modifier.width(10.dp))
 
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).height(contentHeight)) {
             Text(
                 entry.name,
-                fontSize = 13.sp,
-                lineHeight = 16.sp,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 3,
@@ -1252,68 +1269,53 @@ private fun BrowseRow(
             )
             Spacer(Modifier.height(3.dp))
 
-            if (isSubtitle) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                when {
+                    isSubtitle -> Text(
                         entry.name.substringAfterLast('.', "").uppercase().ifBlank { "字幕" },
-                        fontSize = 10.sp,
+                        fontSize = 8.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    Text(
-                        " · ${formatSize(entry.size)}",
-                        fontSize = 10.sp,
-                        color = extra.textMuted
+                    isOther -> Text(
+                        entry.name.substringAfterLast('.', "").uppercase().ifBlank { "FILE" },
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
                     )
-                    formatDavModified(entry.lastModified)?.let {
-                        Text(" · $it", fontSize = 10.sp, color = extra.textMuted, maxLines = 1)
+                    else -> meta.labels.take(2).forEach { label ->
+                        Text(
+                            label,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
-            } else {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    meta.labels.take(2).forEach { label ->
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer)
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                label,
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                Text(
+                    buildString {
+                        append(formatSize(entry.size))
+                        formatDavModified(entry.lastModified)?.let { append(" · $it") }
+                    },
+                    fontSize = 9.sp,
+                    color = extra.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (!isSubtitle && !isOther) {
+                    history?.let {
+                        Text(
+                            "看到 ${formatMs(it.positionMs)}",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = DavTheme.Coral,
+                            maxLines = 1
+                        )
                     }
-                    if (unsupported) {
-                        Text("需外部播放器", fontSize = 8.sp, color = MaterialTheme.colorScheme.error)
-                    }
-                    Text(
-                        buildString {
-                            append(formatSize(entry.size))
-                            formatDavModified(entry.lastModified)?.let { append(" · $it") }
-                        },
-                        fontSize = 9.sp,
-                        color = extra.textMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                history?.let {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        "看到 ${formatMs(it.positionMs)}",
-                        fontSize = 10.sp,
-                        lineHeight = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = DavTheme.Coral,
-                        maxLines = 1
-                    )
                 }
             }
         }
@@ -1338,12 +1340,12 @@ private fun FolderListCard(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
             .shadow(2.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x0A101828))
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = onClick)
-            .padding(12.dp),
+            .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -1355,28 +1357,29 @@ private fun FolderListCard(
         ) {
             Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
         }
-        Spacer(Modifier.width(11.dp))
+        Spacer(Modifier.width(10.dp))
         Column(
-            Modifier.weight(1f).heightIn(min = 40.dp),
+            Modifier.weight(1f).height(64.dp),
             verticalArrangement = Arrangement.Center
         ) {
             Text(
                 entry.name,
-                fontSize = 13.sp,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 "文件夹${formatDavModified(entry.lastModified)?.let { " · $it" } ?: ""}",
-                fontSize = 10.sp,
+                fontSize = 9.sp,
                 color = extra.textMuted,
                 maxLines = 1
             )
         }
-        IconButton(onClick = onMore, modifier = Modifier.size(30.dp)) {
-            Icon(Icons.Default.MoreVert, "更多", tint = extra.textMuted, modifier = Modifier.size(18.dp))
+        IconButton(onClick = onMore, modifier = Modifier.size(26.dp)) {
+            Icon(Icons.Default.MoreVert, "更多", tint = extra.textMuted, modifier = Modifier.size(16.dp))
         }
     }
 }
@@ -1529,6 +1532,7 @@ private fun SubtitleGridCard(
     onMore: () -> Unit
 ) {
     val extra = davExtra()
+    val isSubtitle = isSubtitleFile(entry.name)
     Column(
         modifier
             .shadow(2.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x0A101828))
@@ -1546,7 +1550,7 @@ private fun SubtitleGridCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    Icons.Default.Subtitles, null,
+                    if (isSubtitle) Icons.Default.Subtitles else Icons.Default.InsertDriveFile, null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(21.dp)
                 )
@@ -1567,7 +1571,7 @@ private fun SubtitleGridCard(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "${entry.name.substringAfterLast('.', "").uppercase().ifBlank { "字幕" }} · ${formatSize(entry.size)}",
+            "${entry.name.substringAfterLast('.', "").uppercase().ifBlank { if (isSubtitle) "字幕" else "文件" }} · ${formatSize(entry.size)}",
             fontSize = 9.sp,
             color = extra.textMuted,
             maxLines = 1
