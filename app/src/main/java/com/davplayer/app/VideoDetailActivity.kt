@@ -174,7 +174,7 @@ class VideoDetailActivity : ComponentActivity() {
                 "PLAYER",
                 "init codecMode=${settings.decodeMode} preferSoftware=$preferSoftware title=$title"
             )
-            val renderersFactory = DefaultRenderersFactory(this).apply {
+            val renderersFactory = FfmpegRenderersFactory(this, preferSoftware).apply {
                 setEnableDecoderFallback(true)
                 if (preferSoftware) {
                     setMediaCodecSelector { mimeType, secure, tunneling ->
