@@ -3,8 +3,8 @@ package com.davplayer.app
 import android.content.Context
 import android.os.Handler
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.decoder.ffmpeg.ExperimentalFfmpegVideoRenderer
-import androidx.media3.decoder.ffmpeg.FfmpegLibrary
+import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.FfmpegLibrary
+import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.FfmpegVideoRenderer
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
@@ -33,11 +33,12 @@ class FfmpegRenderersFactory(
     ) {
         AppLog.log(
             "CODEC",
-            "ffmpeg available=${FfmpegLibrary.isAvailable()} version=${FfmpegLibrary.getVersion()} prefer=$preferFfmpeg"
+            "ffmpeg available=${FfmpegLibrary.isAvailable()} version=${FfmpegLibrary.getVersion()} " +
+                "supportsAvc=${FfmpegLibrary.supportsFormat("video/avc")} prefer=$preferFfmpeg"
         )
         if (preferFfmpeg && FfmpegLibrary.isAvailable()) {
             out.add(
-                ExperimentalFfmpegVideoRenderer(
+                FfmpegVideoRenderer(
                     allowedVideoJoiningTimeMs,
                     eventHandler,
                     eventListener,

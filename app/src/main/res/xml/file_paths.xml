@@ -4,4 +4,6 @@
     <external-files-path name="apk_external" path="apk/" />
     <!-- 无外部存储时的兜底：filesDir/apk -->
     <files-path name="apk_internal" path="apk/" />
+    <external-files-path name="logs_external" path="logs/" />
+    <files-path name="logs_internal" path="logs/" />
 </paths>

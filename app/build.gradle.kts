@@ -73,7 +73,6 @@ android {
     }
 
     compileOptions {
-        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -100,11 +99,10 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.4.1")
-    // Media3 的 FFmpeg 视频软解扩展，用于系统 MediaCodec 不支持的 10bit H.264 等格式
-    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.3.1+2")
+    // NextLib 的 FFmpeg 视频软解扩展，用于系统 MediaCodec 不支持的 10bit H.264 等格式
+    implementation("com.github.anilbeesetti.nextlib:nextlib-media3ext:0.8.1")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("io.coil-kt:coil-compose:2.6.0")
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

@@ -59,10 +59,12 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
 import coil.compose.LocalImageLoader
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -88,6 +90,7 @@ import androidx.compose.ui.text.AnnotatedString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -2788,6 +2791,9 @@ fun SettingsScreen(
 @Composable
 fun LogViewerDialog(onDismiss: () -> Unit) {
     var entries by remember { mutableStateOf(AppLog.entries()) }
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var exporting by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(800)
@@ -2801,7 +2807,56 @@ fun LogViewerDialog(onDismiss: () -> Unit) {
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("运行日志", modifier = Modifier.weight(1f))
-                TextButton(onClick = { AppLog.clear(); entries = emptyList() }) { Text("清空") }
+                TextButton(
+                    enabled = !exporting,
+                    onClick = {
+                        exporting = true
+                        scope.launch {
+                            val ok = runCatching {
+                                val base = ctx.getExternalFilesDir(null) ?: ctx.filesDir
+                                val dir = File(base, "logs").apply { mkdirs() }
+                                val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+                                val file = File(dir, "davplayer-log-$stamp.txt")
+                                val pkg = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+                                val header = buildString {
+                                    appendLine("DavPlayer ${pkg.versionName}")
+                                    appendLine("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
+                                    appendLine("Device ${Build.MANUFACTURER} ${Build.MODEL}")
+                                    appendLine()
+                                }
+                                val body = AppLog.entries().asReversed().joinToString("\n") {
+                                    "${timeFmt.format(Date(it.timeMs))} [${it.tag}] ${it.message}"
+                                }
+                                file.writeText(header + body)
+                                val uri = FileProvider.getUriForFile(
+                                    ctx,
+                                    "${ctx.packageName}.fileprovider",
+                                    file
+                                )
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    putExtra(Intent.EXTRA_SUBJECT, "DavPlayer 运行日志")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                ctx.startActivity(Intent.createChooser(intent, "导出日志"))
+                                true
+                            }.getOrDefault(false)
+                            withContext(Dispatchers.Main) {
+                                exporting = false
+                                Toast.makeText(
+                                    ctx,
+                                    if (ok) "日志已生成，请选择保存位置" else "日志导出失败",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                ) { Text(if (exporting) "导出中" else "导出") }
+                TextButton(
+                    enabled = !exporting,
+                    onClick = { AppLog.clear(); entries = emptyList() }
+                ) { Text("清空") }
             }
         },
         text = {
