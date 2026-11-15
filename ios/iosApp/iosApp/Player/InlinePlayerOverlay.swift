@@ -261,16 +261,19 @@ private struct InlinePlayerView: View {
                     minimumDuration: 0.5,
                     maximumDistance: 20,
                     pressing: { pressing in
-                        if pressing && !longPressActive {
-                            longPressActive = true
-                            longPressBaseRate = controller.rate
-                            controller.setRate(2.0)
-                        } else if !pressing && longPressActive {
+                        // 只有长按真正触发后才加速；普通点击不能改 rate，否则 VLC 会短暂丢音频
+                        if !pressing && longPressActive {
                             longPressActive = false
                             controller.setRate(longPressBaseRate)
                         }
                     },
-                    perform: {}
+                    perform: {
+                        if !longPressActive {
+                            longPressActive = true
+                            longPressBaseRate = controller.rate
+                            controller.setRate(2.0)
+                        }
+                    }
                 )
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 20)

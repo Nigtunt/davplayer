@@ -47,16 +47,19 @@ struct VLCPlayerScreen: View {
                     minimumDuration: 0.5,
                     maximumDistance: 20,
                     pressing: { pressing in
-                        if pressing && !longPressActive {
-                            longPressActive = true
-                            longPressBaseRate = controller.rate
-                            controller.setRate(2.0)
-                        } else if !pressing && longPressActive {
+                        // 普通点击不触发 2x，避免 VLC 因 rate 变化短暂断音
+                        if !pressing && longPressActive {
                             longPressActive = false
                             controller.setRate(longPressBaseRate)
                         }
                     },
-                    perform: {}
+                    perform: {
+                        if !longPressActive {
+                            longPressActive = true
+                            longPressBaseRate = controller.rate
+                            controller.setRate(2.0)
+                        }
+                    }
                 )
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 20)

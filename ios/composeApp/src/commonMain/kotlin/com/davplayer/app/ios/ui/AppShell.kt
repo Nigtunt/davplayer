@@ -355,14 +355,14 @@ private fun SettingsTab(
             onOpenSettings = onOpenPrivacy,
             headerContent = {
                 ThemeModeCard(themeMode, onThemeChange)
-                Spacer(Modifier.height(10.dp))
-                ImageCacheCard()
                 Spacer(Modifier.height(18.dp))
             },
             footer = {
                 Column {
                     KomgaSettingsCard()
                     Spacer(Modifier.height(12.dp))
+                    ImageCacheCard()
+                    Spacer(Modifier.height(8.dp))
                     LogCard(onView = { showLog = true })
                 }
             }
