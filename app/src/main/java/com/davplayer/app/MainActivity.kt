@@ -1261,13 +1261,13 @@ private fun BrowseRow(
             Text(
                 entry.name,
                 fontSize = 12.sp,
-                lineHeight = 15.sp,
+                lineHeight = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(2.dp))
 
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
