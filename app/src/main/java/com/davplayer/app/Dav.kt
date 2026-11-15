@@ -87,7 +87,9 @@ fun davTargetPath(dir: String, entry: DavEntry): String {
     val leaf = entry.href.trimEnd('/').substringAfterLast('/').ifBlank {
         java.net.URLEncoder.encode(entry.name, "UTF-8").replace("+", "%20")
     }
-    return dir.trimEnd('/') + "/" + leaf
+    val base = dir.trimEnd('/') + "/" + leaf
+    // 集合 MOVE 的 Destination 保留尾部斜杠，兼容更严格的 WebDAV 服务端
+    return if (entry.isDir) "$base/" else base
 }
 
 /** 把可能是完整 URL（http://host/dav/x）的 href 归一化成服务器路径（/dav/x） */

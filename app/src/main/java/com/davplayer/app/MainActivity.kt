@@ -840,15 +840,15 @@ fun BrowseScreen(
                     Toast.makeText(ctx, "已复制直链", Toast.LENGTH_SHORT).show()
                     actionTarget = null
                 }
-                SheetActionRow(Icons.Default.Info, "文件信息") {
+                SheetActionRow(Icons.Default.Info, if (target.isDir) "文件夹信息" else "文件信息") {
                     actionTarget = null
                     infoTarget = target
                 }
+                SheetActionRow(Icons.Default.Edit, if (target.isDir) "移动文件夹" else "移动文件") {
+                    actionTarget = null
+                    moveTarget = target
+                }
                 if (!target.isDir) {
-                    SheetActionRow(Icons.Default.Edit, "移动") {
-                        actionTarget = null
-                        moveTarget = target
-                    }
                     SheetActionRow(Icons.Default.Delete, "删除", MaterialTheme.colorScheme.error) {
                         actionTarget = null
                         deleteTarget = target
@@ -1174,22 +1174,23 @@ private fun BrowseRow(
     val isSubtitle = isSubtitleFile(entry.name)
     val meta = if (isVideoFile(entry.name)) parseVideoMeta(entry.name) else VideoMeta()
     val unsupported = isVideoFile(entry.name) && isUnsupportedVideo(entry.name)
-    val contentHeight = if (isSubtitle) 56.dp else 66.dp
+    val coverWidth = if (isSubtitle) 52.dp else 96.dp
+    val coverHeight = if (isSubtitle) 52.dp else 58.dp
 
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 5.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
             .shadow(2.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x0A101828))
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = onClick)
-            .padding(10.dp),
+            .padding(8.dp),
         verticalAlignment = Alignment.Top
     ) {
         Box(
             Modifier
-                .size(if (isSubtitle) 56.dp else 116.dp, contentHeight)
+                .size(coverWidth, coverHeight)
                 .clip(RoundedCornerShape(12.dp))
                 .background(
                     if (isSubtitle) MaterialTheme.colorScheme.primaryContainer
@@ -1237,93 +1238,91 @@ private fun BrowseRow(
             }
         }
 
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(10.dp))
 
-        Box(Modifier.weight(1f).height(contentHeight)) {
-            Column(Modifier.fillMaxWidth()) {
-                Text(
-                    entry.name,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = if (isSubtitle) 2 else 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(3.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                entry.name,
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(3.dp))
 
-                if (isSubtitle) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            entry.name.substringAfterLast('.', "").uppercase().ifBlank { "字幕" },
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            " · ${formatSize(entry.size)}",
-                            fontSize = 10.sp,
-                            color = extra.textMuted
-                        )
-                        formatDavModified(entry.lastModified)?.let {
-                            Text(" · $it", fontSize = 10.sp, color = extra.textMuted, maxLines = 1)
-                        }
-                    }
-                } else {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        meta.labels.take(3).forEach { label ->
-                            Box(
-                                Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(MaterialTheme.colorScheme.primaryContainer)
-                                    .padding(horizontal = 5.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    label,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                        if (unsupported) {
-                            Text("需外部播放器", fontSize = 9.sp, color = MaterialTheme.colorScheme.error)
-                        }
-                        Text(
-                            buildString {
-                                append(formatSize(entry.size))
-                                formatDavModified(entry.lastModified)?.let { append(" · $it") }
-                            },
-                            fontSize = 9.sp,
-                            color = extra.textMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+            if (isSubtitle) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        entry.name.substringAfterLast('.', "").uppercase().ifBlank { "字幕" },
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        " · ${formatSize(entry.size)}",
+                        fontSize = 10.sp,
+                        color = extra.textMuted
+                    )
+                    formatDavModified(entry.lastModified)?.let {
+                        Text(" · $it", fontSize = 10.sp, color = extra.textMuted, maxLines = 1)
                     }
                 }
-            }
-            if (!isSubtitle) {
+            } else {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    meta.labels.take(2).forEach { label ->
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                label,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    if (unsupported) {
+                        Text("需外部播放器", fontSize = 8.sp, color = MaterialTheme.colorScheme.error)
+                    }
+                    Text(
+                        buildString {
+                            append(formatSize(entry.size))
+                            formatDavModified(entry.lastModified)?.let { append(" · $it") }
+                        },
+                        fontSize = 9.sp,
+                        color = extra.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
                 history?.let {
+                    Spacer(Modifier.height(2.dp))
                     Text(
                         "看到 ${formatMs(it.positionMs)}",
                         fontSize = 10.sp,
                         lineHeight = 12.sp,
                         fontWeight = FontWeight.Medium,
                         color = DavTheme.Coral,
-                        maxLines = 1,
-                        modifier = Modifier.align(Alignment.BottomStart)
+                        maxLines = 1
                     )
                 }
             }
         }
 
-        IconButton(onClick = onMore, modifier = Modifier.size(30.dp)) {
+        IconButton(onClick = onMore, modifier = Modifier.size(26.dp)) {
             Icon(
                 Icons.Default.MoreVert, "更多",
                 tint = extra.textMuted,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(16.dp)
             )
         }
     }
@@ -1702,7 +1701,7 @@ private fun MoveFileDialog(
     val crumbs = davBreadcrumbs(rootPath, path)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("移动文件") },
+        title = { Text(if (entry.isDir) "移动文件夹" else "移动文件") },
         text = {
             Column {
                 Text(
@@ -1752,7 +1751,13 @@ private fun MoveFileDialog(
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = { reload++ }) { Text("刷新") }
                 }
-                val currentDirs = dirs
+                val currentDirs = dirs?.filterNot { dir ->
+                    // 文件夹不能移动到自身或其子目录里
+                    entry.isDir && (
+                        dir.href.trimEnd('/') == entry.href.trimEnd('/') ||
+                            dir.href.trimEnd('/').startsWith(entry.href.trimEnd('/') + "/")
+                        )
+                }
                 when {
                     error != null -> Text("加载失败：$error", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                     currentDirs == null -> Box(
@@ -1760,7 +1765,7 @@ private fun MoveFileDialog(
                         contentAlignment = Alignment.Center
                     ) { CircularProgressIndicator() }
                     currentDirs.isEmpty() -> Text(
-                        "没有子文件夹，可以直接移动到这里",
+                        "没有可移动到的子文件夹，可以直接移动到这里",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -978,6 +978,20 @@ private fun InlineVideoPlayer(
                         .clip(RoundedCornerShape(99.dp))
                         .background(DavTheme.Coral)
                 )
+                Box(
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .fillMaxWidth(fraction.coerceAtLeast(0.015f))
+                        .height(16.dp)
+                ) {
+                    Box(
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .size(11.dp)
+                            .clip(CircleShape)
+                            .background(DavTheme.Coral)
+                    )
+                }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
