@@ -8,6 +8,7 @@ import kotlin.random.Random
  */
 object PrivacyPin {
     private const val ITERATIONS = 4096
+    private const val HEX = "0123456789abcdef"
     private const val LEGACY_SALT = "davplayer-legacy-pin-v1"
     private const val LEGACY_HASH =
         "7bbbb5eeffc6a1c7769089b9657a0e70efc300be4b3bd3d0ab8e99299f3ab130"
@@ -20,7 +21,7 @@ object PrivacyPin {
     fun setPin(pin: String): Boolean {
         if (!pin.matches(Regex("^[1-9]\\d{5,11}$"))) return false
         val saltBytes = ByteArray(16).also { Random.nextBytes(it) }
-        val salt = saltBytes.joinToString("") { "%02x".format(it) }
+        val salt = saltBytes.joinToString("") { byteHex(it) }
         writeSetting("privacyPinSalt", salt)
         writeSetting("privacyPinHash", derive(pin, salt, ITERATIONS))
         return true
@@ -43,7 +44,12 @@ object PrivacyPin {
         repeat(iterations - 1) {
             digest = sha256(digest)
         }
-        return digest.joinToString("") { "%02x".format(it) }
+        return digest.joinToString("") { byteHex(it) }
+    }
+
+    private fun byteHex(value: Byte): String {
+        val v = value.toInt() and 0xFF
+        return HEX[v ushr 4].toString() + HEX[v and 0x0F]
     }
 
     private fun constantTimeEquals(a: String, b: String): Boolean {
