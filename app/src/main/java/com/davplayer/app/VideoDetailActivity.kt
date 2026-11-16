@@ -3,8 +3,13 @@ package com.davplayer.app
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.LayoutInflater
+import android.view.PixelCopy
+import android.view.SurfaceView
 import android.view.TextureView
+import android.view.View
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -57,6 +62,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +90,7 @@ import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
@@ -118,14 +125,25 @@ class VideoDetailActivity : ComponentActivity() {
         private const val EXTERNAL_SUBTITLE_LABEL = "davplayer-external:"
     }
 
-    private var player: ExoPlayer? = null
+    private val playerState = mutableStateOf<ExoPlayer?>(null)
+    private var player: ExoPlayer?
+        get() = playerState.value
+        set(value) { playerState.value = value }
     private var davClient: WebDavClient? = null
+    private var selectedSource: DavSource? = null
     private var videoUrl = ""
     private var videoHref = ""
     private var videoTitle = ""
     private var lastCoverCaptureAt = 0L
+    private var switchingPlayer = false
+    private var currentSpeed = 1f
+    private var pendingStartPlayer: ExoPlayer? = null
+    private var pendingOldPlayer: ExoPlayer? = null
+    private var pendingPlayWhenReady = false
     private val historyStore by lazy { HistoryStore(this) }
     private val fullscreen = mutableStateOf(false)
+    private val switching = mutableStateOf(false)
+    private val decodeMode = mutableStateOf(VideoDecodeMode.HW_PLUS)
     private val embeddedGroups = mutableStateOf<List<Tracks.Group>>(emptyList())
     private val subtitleHref = mutableStateOf<String?>(null)
     private val subtitleName = mutableStateOf<String?>(null)
@@ -147,10 +165,96 @@ class VideoDetailActivity : ComponentActivity() {
         val source = settings.activeSource()
         val unsupported = isUnsupportedVideo(title.ifBlank { href })
 
-        val exo = if (source == null || unsupported) null else runCatching {
-            val client = WebDavClient(source.url, source.user, source.pass)
-            davClient = client
-            videoUrl = client.fileUrl(href)
+        selectedSource = source
+        davClient = source?.let { WebDavClient(it.url, it.user, it.pass) }
+        videoUrl = davClient?.fileUrl(href).orEmpty()
+        val initialMode = if (looksLike10Bit(title)) {
+            VideoDecodeMode.SW
+        } else {
+            VideoDecodeMode.fromSetting(settings.decodeMode)
+        }
+        decodeMode.value = initialMode
+        player = if (source == null || unsupported) {
+            null
+        } else {
+            createPlayer(initialMode, startPosition, playWhenReady = true, speed = 1f)
+        }
+        lifecycleScope.launch {
+            while (true) {
+                delay(5000)
+                if (player?.isPlaying == true) saveHistory()
+            }
+        }
+
+        setContent {
+            DavThemeProvider(dark = resolveDark(settings.themeMode)) {
+                VideoDetailScreen(
+                    title = title,
+                    href = href,
+                    size = size,
+                    lastModified = lastModified,
+                    subtitleHref = subtitleHref.value,
+                    subtitleName = subtitleName.value,
+                    subtitleSize = subtitleSize,
+                    player = player,
+                    longPressSpeed = settings.longPressSpeed,
+                    error = when {
+                        source == null -> "没有可用的 WebDAV 源"
+                        unsupported -> unsupportedMessage(title.ifBlank { href })
+                        player == null -> "播放器初始化失败"
+                        else -> null
+                    } ?: playbackError.value,
+                    client = davClient,
+                    embedded = embeddedGroups.value,
+                    subtitlesEnabled = embeddedGroups.value.any { it.isSelected } || subtitleHref.value != null,
+                    fullscreen = fullscreen.value,
+                    switching = switching.value,
+                    decodeMode = decodeMode.value,
+                    currentSpeed = currentSpeed,
+                    onSwitchDecodeMode = { switchDecodeMode(it) },
+                    onSpeedChanged = { currentSpeed = it },
+                    onSurfaceReady = { onPlayerSurfaceReady() },
+                    onBack = {
+                        if (fullscreen.value) setPlayerFullscreen(false) else finish()
+                    },
+                    onToggleFullscreen = { setPlayerFullscreen(!fullscreen.value) },
+                    onCaptureCover = { view -> captureCover(view) },
+                    onPickSubtitle = { entry -> loadSubtitle(entry) },
+                    onSelectEmbedded = { group ->
+                        player?.let {
+                            applyTextTrack(it, group)
+                            subtitleName.value = subtitleLabel(group.getTrackFormat(0))
+                            subtitleHref.value = null
+                        }
+                    },
+                    onDisableSubtitles = {
+                        player?.let {
+                            it.trackSelectionParameters = it.trackSelectionParameters.buildUpon()
+                                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                                .build()
+                        }
+                        subtitleName.value = null
+                        subtitleHref.value = null
+                    }
+                )
+            }
+        }
+    }
+
+    private fun createPlayer(
+        mode: VideoDecodeMode,
+        startPosition: Long,
+        playWhenReady: Boolean,
+        speed: Float,
+        muted: Boolean = false
+    ): ExoPlayer? {
+        val source = selectedSource ?: return null
+        val client = davClient ?: WebDavClient(source.url, source.user, source.pass).also {
+            davClient = it
+        }
+        if (videoUrl.isBlank()) videoUrl = client.fileUrl(videoHref)
+        return runCatching {
             val headers = client.authHeaders()
             val dataSource = OkHttpDataSource.Factory(
                 OkHttpClient.Builder().addInterceptor(HttpLogInterceptor()).build()
@@ -169,14 +273,15 @@ class VideoDetailActivity : ComponentActivity() {
                 .setUri(videoUrl)
                 .apply { if (sub != null) setSubtitleConfigurations(listOf(sub)) }
                 .build()
-            val preferSoftware = settings.decodeMode == "sw" || looksLike10Bit(title)
+            val preferFfmpeg = mode == VideoDecodeMode.SW
             AppLog.log(
                 "PLAYER",
-                "init codecMode=${settings.decodeMode} preferSoftware=$preferSoftware title=$title"
+                "init mode=${mode.label} storage=${mode.storage} " +
+                    "preferFfmpeg=$preferFfmpeg title=$videoTitle"
             )
-            val renderersFactory = FfmpegRenderersFactory(this, preferSoftware).apply {
+            val renderersFactory = FfmpegRenderersFactory(this, preferFfmpeg).apply {
                 setEnableDecoderFallback(true)
-                if (preferSoftware) {
+                if (mode == VideoDecodeMode.SW) {
                     setMediaCodecSelector { mimeType, secure, tunneling ->
                         MediaCodecSelector.DEFAULT
                             .getDecoderInfos(mimeType, secure, tunneling)
@@ -222,7 +327,7 @@ class VideoDetailActivity : ComponentActivity() {
                         }
 
                         override fun onPlayerError(error: PlaybackException) {
-                            playingError(error)
+                            if (!switchingPlayer) playingError(error)
                         }
                     })
                     addAnalyticsListener(object : AnalyticsListener {
@@ -253,7 +358,7 @@ class VideoDetailActivity : ComponentActivity() {
                             AppLog.log(
                                 "VIDEO",
                                 "codec=${format.codecs ?: "-"} ${format.width}x${format.height} " +
-                                    "bitrate=${format.bitrate} profile=${format.codecs}"
+                                    "bitrate=${format.bitrate}"
                             )
                         }
 
@@ -273,79 +378,158 @@ class VideoDetailActivity : ComponentActivity() {
                         ) {
                             AppLog.log(
                                 "PLAYER",
-                                "analytic error ${error.errorCodeName}: ${error.message}; cause=${error.cause?.javaClass?.simpleName}: ${error.cause?.message}"
+                                "analytic error ${error.errorCodeName}: ${error.message}; " +
+                                    "cause=${error.cause?.javaClass?.simpleName}: ${error.cause?.message}\n" +
+                                    error.stackTraceToString()
                             )
                         }
                     })
                     setMediaItem(item)
                     prepare()
                     if (startPosition > 0) seekTo(startPosition)
-                    playWhenReady = true
+                    if (speed != 1f) playbackParameters = PlaybackParameters(speed)
+                    volume = if (muted) 0f else 1f
+                    this.playWhenReady = playWhenReady
+                    if (!muted) currentSpeed = speed
                 }
+        }.onFailure {
+            AppLog.log("PLAYER", "create failed mode=${mode.label}: ${it.message}")
         }.getOrNull()
-        player = exo
-        lifecycleScope.launch {
-            while (true) {
-                delay(5000)
-                if (exo?.isPlaying == true) saveHistory()
-            }
+    }
+
+    private fun switchDecodeMode(mode: VideoDecodeMode) {
+        if (mode == decodeMode.value || switchingPlayer) return
+        val old = player ?: return
+        val oldMode = decodeMode.value
+
+        // HW copy 和 HW+ 共用 MediaCodec，只替换输出 Surface，不重建播放器。
+        // 音频 Renderer 和播放时钟都保持不动。
+        if (oldMode.usesMediaCodec && mode.usesMediaCodec) {
+            switching.value = true
+            decodeMode.value = mode
+            Settings(this).decodeMode = mode.storage
+            AppLog.log("PLAYER", "surface switch mode=${mode.label}")
+            Handler(Looper.getMainLooper()).postDelayed({
+                switching.value = false
+            }, 220L)
+            Toast.makeText(this, "解码：${mode.label}", Toast.LENGTH_SHORT).show()
+            return
         }
 
-        setContent {
-            DavThemeProvider(dark = resolveDark(settings.themeMode)) {
-                VideoDetailScreen(
-                    title = title,
-                    href = href,
-                    size = size,
-                    lastModified = lastModified,
-                    subtitleHref = subtitleHref.value,
-                    subtitleName = subtitleName.value,
-                    subtitleSize = subtitleSize,
-                    player = exo,
-                    longPressSpeed = settings.longPressSpeed,
-                    error = when {
-                        source == null -> "没有可用的 WebDAV 源"
-                        unsupported -> unsupportedMessage(title.ifBlank { href })
-                        exo == null -> "播放器初始化失败"
-                        else -> null
-                    } ?: playbackError.value,
-                    client = davClient,
-                    embedded = embeddedGroups.value,
-                    subtitlesEnabled = embeddedGroups.value.any { it.isSelected } || subtitleHref.value != null,
-                    fullscreen = fullscreen.value,
-                    onBack = {
-                        if (fullscreen.value) setPlayerFullscreen(false) else finish()
-                    },
-                    onToggleFullscreen = { setPlayerFullscreen(!fullscreen.value) },
-                    onCaptureCover = { texture -> captureCover(texture) },
-                    onPickSubtitle = { entry -> loadSubtitle(entry) },
-                    onSelectEmbedded = { group ->
-                        player?.let {
-                            applyTextTrack(it, group)
-                            subtitleName.value = subtitleLabel(group.getTrackFormat(0))
-                            subtitleHref.value = null
-                        }
-                    },
-                    onDisableSubtitles = {
-                        player?.let {
-                            it.trackSelectionParameters = it.trackSelectionParameters.buildUpon()
-                                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                                .build()
-                        }
-                        subtitleName.value = null
-                        subtitleHref.value = null
-                    }
-                )
-            }
+        val position = old.currentPosition.coerceAtLeast(0)
+        val playing = old.isPlaying || old.playWhenReady
+        val speed = old.playbackParameters.speed
+        switchingPlayer = true
+        switching.value = true
+        playbackError.value = null
+        saveHistory()
+        AppLog.log("PLAYER", "prepare switch ${oldMode.label} -> ${mode.label} at ${position}ms")
+
+        // 先创建并准备目标模式播放器，旧播放器继续播放，准备失败也不会先黑屏。
+        val shadow = createPlayer(
+            mode = mode,
+            startPosition = position,
+            playWhenReady = false,
+            speed = speed,
+            muted = true
+        )
+        if (shadow == null) {
+            switchingPlayer = false
+            switching.value = false
+            Toast.makeText(this, "切换 ${mode.label} 失败，继续使用当前解码", Toast.LENGTH_SHORT).show()
+            return
         }
+
+        var finished = false
+        var timeout: Runnable? = null
+
+        fun failSwitch(reason: String) {
+            if (finished) return
+            finished = true
+            timeout?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
+            switchingPlayer = false
+            switching.value = false
+            shadow.release()
+            AppLog.log("PLAYER", "switch failed mode=${mode.label}: $reason")
+            Toast.makeText(this, "切换失败，继续使用当前解码", Toast.LENGTH_SHORT).show()
+        }
+
+        fun finishSwitch() {
+            if (finished) return
+            finished = true
+            timeout?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
+            // 准备期间旧播放器可能已经前进，替换前再对齐一次。
+            val livePosition = old.currentPosition.coerceAtLeast(0)
+            shadow.seekTo(livePosition)
+            shadow.volume = 1f
+            // 关键：先不要启动 shadow。FFmpeg/MediaCodec 需要先拿到新的
+            // PlayerView Surface，否则会在无 surface 时渲染并抛 NPE。
+            // 等 Compose 把新 Surface 接上后再 start。
+            old.pause()
+            currentSpeed = speed
+            decodeMode.value = mode
+            player = shadow
+            pendingStartPlayer = shadow
+            pendingOldPlayer = old
+            pendingPlayWhenReady = playing
+            Settings(this).decodeMode = mode.storage
+            AppLog.log("PLAYER", "switch applied mode=${mode.label} at ${livePosition}ms")
+            // 正常情况下 AndroidView 会立刻回调 onSurfaceReady；这里只是兜底。
+            Handler(Looper.getMainLooper()).postDelayed({
+                startPendingPlayer()
+            }, 700L)
+            Toast.makeText(this, "解码：${mode.label}", Toast.LENGTH_SHORT).show()
+        }
+
+        shadow.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) finishSwitch()
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                failSwitch(error.errorCodeName)
+            }
+        })
+        if (shadow.playbackState == Player.STATE_READY) {
+            finishSwitch()
+        }
+
+        timeout = Runnable { failSwitch("准备超时") }
+        Handler(Looper.getMainLooper()).postDelayed(timeout!!, 10_000L)
+    }
+
+    private fun onPlayerSurfaceReady() {
+        startPendingPlayer()
+    }
+
+    private fun startPendingPlayer() {
+        val target = pendingStartPlayer ?: return
+        if (player !== target) {
+            pendingStartPlayer = null
+            pendingOldPlayer?.release()
+            pendingOldPlayer = null
+            switchingPlayer = false
+            switching.value = false
+            return
+        }
+        pendingStartPlayer = null
+        target.playWhenReady = pendingPlayWhenReady
+        AppLog.log("PLAYER", "switch start mode=${decodeMode.value.label}")
+        val old = pendingOldPlayer
+        pendingOldPlayer = null
+        Handler(Looper.getMainLooper()).postDelayed({
+            old?.release()
+            switchingPlayer = false
+            switching.value = false
+        }, 320L)
     }
 
     private fun playingError(error: PlaybackException) {
         AppLog.log(
             "PLAYER",
             "播放失败 ${error.errorCodeName}: ${error.message}; " +
-                "cause=${error.cause?.javaClass?.simpleName}: ${error.cause?.message}"
+                "cause=${error.cause?.javaClass?.simpleName}: ${error.cause?.message}\n" +
+                error.stackTraceToString()
         )
         val base = describePlaybackError(error)
         playbackError.value = if (looksLike10Bit(videoTitle)) {
@@ -356,7 +540,7 @@ class VideoDetailActivity : ComponentActivity() {
         }
     }
 
-    private fun captureCover(texture: TextureView) {
+    private fun captureCover(view: View) {
         if (videoHref.isBlank()) return
         val exo = player ?: return
         // 必须等解码器真正出画面，避免刚进页面/退出时截到黑帧
@@ -367,14 +551,43 @@ class VideoDetailActivity : ComponentActivity() {
         val now = android.os.SystemClock.elapsedRealtime()
         // 同一张封面每 10 秒覆盖一次，避免生成大量文件
         if (lastCoverCaptureAt > 0 && now - lastCoverCaptureAt < 10_000L) return
-        val bitmap = texture.bitmap ?: return
-        if (isMostlyBlack(bitmap)) return
+        when (view) {
+            is TextureView -> {
+                val bitmap = view.bitmap ?: return
+                lastCoverCaptureAt = now
+                saveCoverBitmap(bitmap, recycleAfter = false)
+            }
+            is SurfaceView -> {
+                if (view.width <= 0 || view.height <= 0) return
+                lastCoverCaptureAt = now
+                val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+                PixelCopy.request(
+                    view,
+                    bitmap,
+                    { result ->
+                        if (result == PixelCopy.SUCCESS) {
+                            saveCoverBitmap(bitmap, recycleAfter = true)
+                        } else {
+                            bitmap.recycle()
+                        }
+                    },
+                    Handler(Looper.getMainLooper())
+                )
+            }
+        }
+    }
+
+    private fun saveCoverBitmap(bitmap: Bitmap, recycleAfter: Boolean) {
+        if (isMostlyBlack(bitmap)) {
+            if (recycleAfter) bitmap.recycle()
+            return
+        }
         runCatching {
             historyStore.coverFile(videoHref).outputStream().use { output ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 86, output)
             }
-            lastCoverCaptureAt = now
         }
+        if (recycleAfter) bitmap.recycle()
     }
 
     private fun isMostlyBlack(bitmap: Bitmap): Boolean {
@@ -491,9 +704,15 @@ private fun VideoDetailScreen(
     embedded: List<Tracks.Group>,
     subtitlesEnabled: Boolean,
     fullscreen: Boolean,
+    switching: Boolean,
+    decodeMode: VideoDecodeMode,
+    currentSpeed: Float,
+    onSwitchDecodeMode: (VideoDecodeMode) -> Unit,
+    onSpeedChanged: (Float) -> Unit,
+    onSurfaceReady: () -> Unit,
     onBack: () -> Unit,
     onToggleFullscreen: () -> Unit,
-    onCaptureCover: (TextureView) -> Unit,
+    onCaptureCover: (View) -> Unit,
     onPickSubtitle: (DavEntry) -> Unit,
     onSelectEmbedded: (Tracks.Group) -> Unit,
     onDisableSubtitles: () -> Unit
@@ -529,6 +748,12 @@ private fun VideoDetailScreen(
                     quality = meta.labels.firstOrNull(),
                     longPressSpeed = longPressSpeed,
                     fullscreen = true,
+                    switching = switching,
+                    decodeMode = decodeMode,
+                    initialSpeed = currentSpeed,
+                    onSwitchDecodeMode = onSwitchDecodeMode,
+                    onSpeedChanged = onSpeedChanged,
+                    onSurfaceReady = onSurfaceReady,
                     onBack = onBack,
                     onToggleFullscreen = onToggleFullscreen,
                     onCopyLink = copyLink,
@@ -560,6 +785,12 @@ private fun VideoDetailScreen(
                     quality = meta.labels.firstOrNull(),
                     longPressSpeed = longPressSpeed,
                     fullscreen = false,
+                    switching = switching,
+                    decodeMode = decodeMode,
+                    initialSpeed = currentSpeed,
+                    onSwitchDecodeMode = onSwitchDecodeMode,
+                    onSpeedChanged = onSpeedChanged,
+                    onSurfaceReady = onSurfaceReady,
                     onBack = onBack,
                     onToggleFullscreen = onToggleFullscreen,
                     onCopyLink = copyLink,
@@ -792,20 +1023,26 @@ private fun InlineVideoPlayer(
     quality: String?,
     longPressSpeed: Float,
     fullscreen: Boolean,
+    switching: Boolean,
+    decodeMode: VideoDecodeMode,
+    initialSpeed: Float,
+    onSwitchDecodeMode: (VideoDecodeMode) -> Unit,
+    onSpeedChanged: (Float) -> Unit,
+    onSurfaceReady: () -> Unit,
     onBack: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onCopyLink: () -> Unit,
     onExternalPlay: () -> Unit,
-    onCaptureCover: (TextureView) -> Unit,
+    onCaptureCover: (View) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var playing by remember { mutableStateOf(player.isPlaying) }
-    var textureView by remember { mutableStateOf<TextureView?>(null) }
+    var videoSurface by remember { mutableStateOf<View?>(null) }
     var position by remember { mutableLongStateOf(player.currentPosition.coerceAtLeast(0)) }
     var duration by remember { mutableLongStateOf(player.duration.coerceAtLeast(0)) }
     var seekFraction by remember { mutableStateOf<Float?>(null) }
     var seekPreview by remember { mutableStateOf<Long?>(null) }
-    var speed by remember { mutableFloatStateOf(1f) }
+    var speed by remember(player) { mutableFloatStateOf(initialSpeed) }
     var boosting by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -836,9 +1073,9 @@ private fun InlineVideoPlayer(
         }
     }
 
-    LaunchedEffect(textureView, position) {
+    LaunchedEffect(videoSurface, position) {
         if (position > 2000) {
-            textureView?.let { onCaptureCover(it) }
+            videoSurface?.let { onCaptureCover(it) }
         }
     }
 
@@ -850,26 +1087,34 @@ private fun InlineVideoPlayer(
     }
 
     Box(modifier.background(Color.Black)) {
-        AndroidView(
-            factory = { ctx ->
-                (LayoutInflater.from(ctx).inflate(R.layout.view_player_texture, null) as PlayerView).apply {
-                    this.player = player
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-                    setBackgroundColor(android.graphics.Color.BLACK)
-                    subtitleView?.apply {
-                        setApplyEmbeddedStyles(true)
-                        setApplyEmbeddedFontSizes(true)
-                        setStyle(CaptionStyleCompat.DEFAULT)
+        key(decodeMode) {
+            AndroidView(
+                factory = { ctx ->
+                    val layout = if (decodeMode == VideoDecodeMode.HW_COPY) {
+                        R.layout.view_player_texture
+                    } else {
+                        R.layout.view_player_surface
                     }
-                }
-            },
-            update = { view ->
-                textureView = view.getVideoSurfaceView() as? TextureView
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+                    (LayoutInflater.from(ctx).inflate(layout, null) as PlayerView).apply {
+                        this.player = player
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                        setBackgroundColor(android.graphics.Color.BLACK)
+                        subtitleView?.apply {
+                            setApplyEmbeddedStyles(true)
+                            setApplyEmbeddedFontSizes(true)
+                            setStyle(CaptionStyleCompat.DEFAULT)
+                        }
+                    }.also { onSurfaceReady() }
+                },
+                update = { view ->
+                    videoSurface = view.getVideoSurfaceView() as? View
+                    onSurfaceReady()
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // 空白区域手势：单击显隐控制层，双击全屏，长按临时倍速，横滑调进度
         Box(
@@ -947,6 +1192,25 @@ private fun InlineVideoPlayer(
             }
         }
 
+        if (switching) {
+            Box(
+                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.78f),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        "切换解码中…",
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                        color = Color.White,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+
         AnimatedVisibility(
             visible = controlsVisible,
             enter = fadeIn(),
@@ -995,6 +1259,17 @@ private fun InlineVideoPlayer(
                     Icon(Icons.Default.MoreVert, "更多", tint = Color.White)
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    VideoDecodeMode.entries.forEach { mode ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (mode == decodeMode) "✓ ${mode.label}" else mode.label)
+                            },
+                            onClick = {
+                                menuOpen = false
+                                onSwitchDecodeMode(mode)
+                            }
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("复制直链") },
                         leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
@@ -1123,11 +1398,26 @@ private fun InlineVideoPlayer(
                 Box(
                     Modifier
                         .clip(RoundedCornerShape(6.dp))
+                        .clickable { menuOpen = true }
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        decodeMode.label,
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(6.dp))
                         .clickable {
                             val presets = listOf(1f, 1.25f, 1.5f, 2f)
                             val next = presets[(presets.indexOf(speed).coerceAtLeast(0) + 1) % presets.size]
                             speed = next
                             player.setPlaybackSpeed(next)
+                            onSpeedChanged(next)
                         }
                         .padding(horizontal = 7.dp, vertical = 3.dp)
                 ) {

@@ -481,7 +481,7 @@ fun BrowseScreen(
 
     val visibleEntries = entries.orEmpty()
     val sortedFiles = sortDavEntries(visibleEntries.filterNot { it.isDir }, sortMode)
-    val folders = sortDavEntries(visibleEntries.filter { it.isDir }, "name")
+    val folders = sortDavEntries(visibleEntries.filter { it.isDir }, sortMode)
     val videos = sortedFiles.filter { isVideoFile(it.name) }
     val subtitles = sortedFiles.filter { isSubtitleFile(it.name) }
     val counts = mapOf(
@@ -2704,16 +2704,22 @@ fun SettingsScreen(
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("解码方式", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                        Text("部分视频硬解卡顿时切软件优先，重开视频生效", fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            "SW 使用 FFmpeg 软解；HW copy/ HW+ 使用 MediaCodec。播放器内也可以随时切换",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
                 Row(
                     Modifier.padding(start = 13.dp, end = 13.dp, bottom = 13.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("hw" to "硬件优先", "sw" to "软件优先").forEach { (m, label) ->
-                        PulseChip(label, decodeMode == m) { decodeMode = m; settings.decodeMode = m }
+                    VideoDecodeMode.entries.forEach { mode ->
+                        PulseChip(mode.label, decodeMode == mode.storage) {
+                            decodeMode = mode.storage
+                            settings.decodeMode = mode.storage
+                        }
                     }
                 }
             }
@@ -2723,6 +2729,7 @@ fun SettingsScreen(
         item { GroupLabel("隐私") }
         item {
             var privateMode by remember { mutableStateOf(settings.privacyMode) }
+            var showPinDialog by remember { mutableStateOf(false) }
             SettingsBlock {
                 Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
                     SIcon("🔒")
@@ -2730,22 +2737,50 @@ fun SettingsScreen(
                     Column(Modifier.weight(1f)) {
                         Text("隐私模式", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "启动时显示计算器，输入 19981212 后按 = 进入应用；退到后台会重新上锁",
+                            "启动时显示计算器，输入隐私暗码后按 = 进入应用；退到后台会重新上锁",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(
                         checked = privateMode,
-                        onCheckedChange = {
-                            privateMode = it
-                            settings.privacyMode = it
+                        onCheckedChange = { checked ->
+                            if (!checked) {
+                                privateMode = false
+                                settings.privacyMode = false
+                            } else if (settings.hasPrivacyPin()) {
+                                privateMode = true
+                                settings.privacyMode = true
+                            } else {
+                                // 首次开启必须先配置暗码，不再使用内置默认值
+                                showPinDialog = true
+                            }
                         },
                         colors = SwitchDefaults.colors(
                             checkedTrackColor = MaterialTheme.colorScheme.primary
                         )
                     )
                 }
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, bottom = 12.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = { showPinDialog = true }) {
+                        Text(if (settings.hasPrivacyPin()) "修改暗码" else "设置暗码", fontSize = 12.sp)
+                    }
+                }
+            }
+            if (showPinDialog) {
+                PrivacyPinDialog(
+                    onDismiss = { showPinDialog = false },
+                    onSave = { pin ->
+                        if (settings.setPrivacyPin(pin)) {
+                            privateMode = true
+                            settings.privacyMode = true
+                            showPinDialog = false
+                        }
+                    }
+                )
             }
         }
 

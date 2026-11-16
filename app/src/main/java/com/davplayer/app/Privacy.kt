@@ -34,9 +34,6 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
-/** 隐私模式暗码：输入它并按 = 才进入应用 */
-const val PRIVACY_CODE = "19981212"
-
 /**
  * 全局锁状态。Android 上 App() 负责维护，
  * 播放器 / 阅读器在 onResume 里检查，避免后台返回时绕过锁屏。
@@ -49,8 +46,8 @@ object PrivacyGate {
 private enum class KeyKind { Digit, Func, Operator }
 
 /**
- * 伪装成计算器的锁屏：支持四则运算、百分号、正负号、退格，
- * 输入 [PRIVACY_CODE] 后按 = 才回调 [onUnlock]。
+ * 伪装成计算器的锁屏：支持四则运算、百分号、正负号、退格。
+ * 输入隐私暗码后按 = 才回调 [onUnlock]，暗码只以加盐摘要保存。
  */
 @Composable
 fun CalculatorScreen(onUnlock: () -> Unit) {
@@ -122,7 +119,7 @@ fun CalculatorScreen(onUnlock: () -> Unit) {
 
     fun doEquals() {
         // 暗码校验：必须是「当前输入就是这个数字」再按 =
-        if (display == PRIVACY_CODE) {
+        if (Settings(ctx).verifyPrivacyPin(display)) {
             onUnlock()
             return
         }

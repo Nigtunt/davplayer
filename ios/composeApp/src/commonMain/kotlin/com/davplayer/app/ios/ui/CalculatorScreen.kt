@@ -28,15 +28,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.davplayer.app.ios.data.PRIVACY_CODE
+import com.davplayer.app.ios.data.PrivacyPin
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
 private enum class KeyKind { Digit, Func, Operator }
 
 /**
- * 伪装成计算器的锁屏（iOS）：四则运算 + 百分号 + 正负号 + 退格，
- * 输入 [PRIVACY_CODE] 后按 = 才回调 [onUnlock]。
+ * 伪装成计算器的锁屏（iOS）：四则运算 + 百分号 + 正负号 + 退格。
+ * 输入隐私暗码后按 = 才回调 [onUnlock]，暗码只保存加盐摘要。
  */
 @Composable
 fun CalculatorScreen(onUnlock: () -> Unit) {
@@ -105,7 +105,7 @@ fun CalculatorScreen(onUnlock: () -> Unit) {
     }
 
     fun doEquals() {
-        if (display == PRIVACY_CODE) {
+        if (PrivacyPin.verify(display)) {
             onUnlock()
             return
         }

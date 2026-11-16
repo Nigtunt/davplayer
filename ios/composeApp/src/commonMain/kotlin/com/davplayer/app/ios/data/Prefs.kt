@@ -4,9 +4,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
-/** 隐私模式暗码：与 Android 端保持一致 */
-const val PRIVACY_CODE = "19981212"
-
 /** 隐私模式开关（iOS 用 NSUserDefaults） */
 expect fun readPrivacyMode(): Boolean
 

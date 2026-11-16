@@ -7,6 +7,9 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
+import io.ktor.http.URLBuilder
+import io.ktor.http.Url
+import io.ktor.http.takeFrom
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -33,6 +36,7 @@ class DavClient(baseUrl: String, private val user: String, private val pass: Str
         val host = if (rest.contains('/')) rest.substringBefore('/') else rest
         "$scheme://$host"
     }
+    private val originUrl = Url("$origin/")
 
     /** 服务器根路径（已编码），如 /dav/ */
     val rootPath: String = run {
@@ -52,8 +56,24 @@ class DavClient(baseUrl: String, private val user: String, private val pass: Str
     val authUser: String get() = user
     val authPass: String get() = pass
 
-    fun url(path: String): String =
-        if (path.startsWith("http", true)) path else origin + path
+    fun url(path: String): String = requestUrl(path).toString()
+
+    /**
+     * 用 encodedPathSegments 构造 URL，避免 Ktor/NSURL 把服务器已经编码好的
+     * %XX（尤其 %2F、%25、长路径）再次编码，造成目录请求变成另一个路径。
+     */
+    private fun requestUrl(path: String): Url {
+        if (path.startsWith("http://", true) || path.startsWith("https://", true)) {
+            return Url(path)
+        }
+        val clean = path.substringBefore('?')
+        return URLBuilder().apply {
+            protocol = originUrl.protocol
+            host = originUrl.host
+            port = originUrl.port
+            encodedPathSegments = clean.trimStart('/').split('/')
+        }.build()
+    }
 
     suspend fun list(path: String): List<DavEntry> = withContext(Dispatchers.Default) {
         val body = """<?xml version="1.0" encoding="utf-8" ?>""" +
@@ -62,7 +82,13 @@ class DavClient(baseUrl: String, private val user: String, private val pass: Str
                 """<D:getlastmodified/>""" +
                 """</D:prop></D:propfind>"""
 
-        val response = http.request(url(path)) {
+        val requestUrl = requestUrl(path)
+        AppLog.info(
+            "WebDAV",
+            "PROPFIND intent=${requestUrl} len=${requestUrl.toString().length} path=$path"
+        )
+        val response = http.request {
+            url.takeFrom(requestUrl)
             method = HttpMethod("PROPFIND")
             header("Depth", "1")
             header(HttpHeaders.ContentType, "application/xml; charset=utf-8")
@@ -70,10 +96,11 @@ class DavClient(baseUrl: String, private val user: String, private val pass: Str
             setBody(body)
         }
         val status = response.status.value
+        val finalUrl = response.call.request.url.toString()
         val xml = response.bodyAsText()
 
         if (status !in 200..299) {
-            AppLog.error("WebDAV", "PROPFIND $path -> HTTP $status")
+            AppLog.error("WebDAV", "PROPFIND $finalUrl -> HTTP $status (intent=$requestUrl)")
             throw IllegalStateException("WebDAV 请求失败：HTTP $status")
         }
         // 不是 multistatus 说明拿到的是登录页/网页/错误页，而不是目录列表，
@@ -193,7 +220,8 @@ fun formatDavModified(raw: String): String? {
         "sep" -> "09"; "oct" -> "10"; "nov" -> "11"; "dec" -> "12"
         else -> return null
     }
-    return "${m.groupValues[1]}-$month ${m.groupValues[4]}:${m.groupValues[5]}"
+    // iOS 浏览列表只展示月-日，时间不占宽度
+    return "$month-${m.groupValues[1]}"
 }
 
 /** 文件所在目录，保证以 / 结尾 */

@@ -5,7 +5,17 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.UUID
+
+private const val PRIVACY_PIN_ITERATIONS = 4096
+private const val LEGACY_PRIVACY_SALT = "davplayer-legacy-pin-v1"
+// 旧版默认暗码的加盐摘要，兼容未配置过自定义暗码的老用户；不保存明文。
+private const val LEGACY_PRIVACY_PIN_HASH =
+    "7bbbb5eeffc6a1c7769089b9657a0e70efc300be4b3bd3d0ab8e99299f3ab130"
+// 兼容更早版本内置暗码的摘要，避免老用户升级后被锁在门外。
+private const val OLD_LEGACY_PRIVACY_PIN_HASH =
+    "d929db26592328c6c9a581f6149b27dadc3dd5649b802049b8e1b89213dbb907"
 
 data class DavSource(
     val id: String = UUID.randomUUID().toString(),
@@ -113,6 +123,60 @@ class Settings(ctx: Context) {
     var privacyMode: Boolean
         get() = sp.getBoolean("privacyMode", false)
         set(v) = sp.edit().putBoolean("privacyMode", v).apply()
+
+    // ---------- 隐私暗码：只保存加盐哈希，不落明文 ----------
+
+    fun hasPrivacyPin(): Boolean =
+        !sp.getString("privacyPinHash", null).isNullOrBlank()
+
+    /** 设置/修改暗码；返回是否成功。PIN 只保存加盐 SHA-256 摘要。 */
+    fun setPrivacyPin(pin: String): Boolean {
+        if (!pin.matches(Regex("^[1-9]\\d{5,11}$"))) return false
+        val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+            .joinToString("") { "%02x".format(it) }
+        val hash = derivePrivacyPin(pin, salt, PRIVACY_PIN_ITERATIONS)
+        sp.edit()
+            .putString("privacyPinSalt", salt)
+            .putString("privacyPinHash", hash)
+            .putInt("privacyPinIterations", PRIVACY_PIN_ITERATIONS)
+            .apply()
+        return true
+    }
+
+    fun verifyPrivacyPin(pin: String): Boolean {
+        if (!pin.matches(Regex("^[1-9]\\d{5,11}$"))) return false
+        val storedHash = sp.getString("privacyPinHash", null)
+        if (!storedHash.isNullOrBlank()) {
+            val salt = sp.getString("privacyPinSalt", null) ?: return false
+            val iterations = sp.getInt("privacyPinIterations", PRIVACY_PIN_ITERATIONS)
+                .coerceAtLeast(1)
+            return constantTimeEquals(
+                storedHash,
+                derivePrivacyPin(pin, salt, iterations)
+            )
+        }
+        // 旧版本没有保存过自定义暗码的用户，继续兼容旧默认暗码。
+        // 这里只比较摘要，不在代码/设置界面写明文。
+        val derived = derivePrivacyPin(pin, LEGACY_PRIVACY_SALT, PRIVACY_PIN_ITERATIONS)
+        return constantTimeEquals(LEGACY_PRIVACY_PIN_HASH, derived) ||
+            constantTimeEquals(OLD_LEGACY_PRIVACY_PIN_HASH, derived)
+    }
+
+    private fun derivePrivacyPin(pin: String, salt: String, iterations: Int): String {
+        var digest = MessageDigest.getInstance("SHA-256")
+            .digest("$salt:$pin".toByteArray(Charsets.UTF_8))
+        repeat(iterations - 1) {
+            digest = MessageDigest.getInstance("SHA-256").digest(digest)
+        }
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun constantTimeEquals(a: String, b: String): Boolean {
+        if (a.length != b.length) return false
+        var diff = 0
+        for (i in a.indices) diff = diff or (a[i].code xor b[i].code)
+        return diff == 0
+    }
 
     // ---------- Komga 服务器 ----------
 
