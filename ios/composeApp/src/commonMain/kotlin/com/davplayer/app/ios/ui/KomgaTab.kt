@@ -52,8 +52,6 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -744,12 +742,12 @@ private fun SortMenu(
     onSelect: (Int) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Box {
+    Column {
         Row(
             Modifier
                 .clip(RoundedCornerShape(50))
                 .background(SurfaceHigh)
-                .clickable { expanded = true }
+                .clickable { expanded = !expanded }
                 .padding(start = 12.dp, end = 9.dp, top = 7.dp, bottom = 7.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -762,20 +760,35 @@ private fun SortMenu(
                 color = Brand
             )
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEachIndexed { index, text ->
-                DropdownMenuItem(
-                    text = {
+        // 不使用 DropdownMenu：iOS 上它基于独立 UIKit ComposeSceneLayer，
+        // 快速切换排序时反复销毁弹层会触发 Compose DepthSortedSet 崩溃。
+        if (expanded) {
+            Column(
+                Modifier
+                    .padding(top = 4.dp)
+                    .width(158.dp)
+                    .shadow(4.dp, RoundedCornerShape(12.dp), ambientColor = Color(0x18101828))
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SurfaceHigh)
+            ) {
+                options.forEachIndexed { index, text ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                expanded = false
+                                onSelect(index)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
                             if (text == selectedLabel) "$text  ${if (ascending) "↑" else "↓"}" else text,
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            color = TextMain
                         )
-                    },
-                    onClick = {
-                        expanded = false
-                        onSelect(index)
                     }
-                )
+                }
             }
         }
     }
