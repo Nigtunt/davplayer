@@ -5,7 +5,9 @@ import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -72,12 +74,110 @@ class KomgaHomeState {
     var loaded by mutableStateOf(false)
 }
 
+private enum class KomgaSeriesSort(
+    val label: String,
+    val field: String,
+    val defaultAscending: Boolean
+) {
+    Title("标题", "metadata.titleSort", true),
+    Updated("最近更新", "lastModified", false),
+    Added("最近添加", "created", false),
+    FileUpdated("文件修改", "fileLastModified", false),
+    Books("书籍数量", "booksCount", false),
+    Read("已读数量", "booksReadCount", false),
+    Unread("未读数量", "booksUnreadCount", false),
+    InProgress("在读数量", "booksInProgressCount", false),
+    Publisher("出版社", "metadata.publisher", true),
+    Release("发行日期", "booksMetadata.releaseDate", false),
+    AgeRating("年龄分级", "metadata.ageRating", false),
+    TotalBooks("预期总册数", "metadata.totalBookCount", false)
+}
+
+private enum class KomgaBookSort(
+    val label: String,
+    val field: String,
+    val defaultAscending: Boolean
+) {
+    Number("卷号", "metadata.numberSort", true),
+    Title("标题", "metadata.title", true),
+    Release("发行日期", "metadata.releaseDate", false),
+    Added("最近添加", "created", false),
+    Updated("最近更新", "lastModified", false),
+    FileUpdated("文件修改", "fileLastModified", false),
+    Size("文件大小", "sizeBytes", false),
+    Pages("页数", "media.pagesCount", false),
+    ReadPage("阅读进度", "readProgress.page", false),
+    ReadDate("最近阅读", "readProgress.lastModified", false),
+    Isbn("ISBN", "metadata.isbn", true)
+}
+
+data class KomgaSortState(val field: String, val label: String, val ascending: Boolean) {
+    val query: String get() = "$this.field,${if (ascending) "asc" else "desc"}"
+}
+
+@Composable
+private fun KomgaSortButton(
+    label: String,
+    ascending: Boolean,
+    options: List<Pair<String, Boolean>>,
+    onSelect: (Int) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(50))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .clickable { expanded = true }
+                .padding(start = 12.dp, end = 9.dp, top = 7.dp, bottom = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                label,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                if (ascending) "↑" else "↓",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEachIndexed { index, (text, selected) ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            if (selected) "$text  ${if (ascending) "↑" else "↓"}" else text,
+                            fontSize = 13.sp
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onSelect(index)
+                    }
+                )
+            }
+        }
+    }
+}
+
 /** 系列列表数据：按书库保存，从详情返回不重取、滚动位置不丢 */
 class KomgaSeriesListState {
     var items by mutableStateOf<List<KomgaSeries>>(emptyList())
     var page = 0
     var isLast = false
     var searchQuery by mutableStateOf("")
+    var sort by mutableStateOf(
+        KomgaSortState(
+            KomgaSeriesSort.Title.field,
+            KomgaSeriesSort.Title.label,
+            KomgaSeriesSort.Title.defaultAscending
+        )
+    )
     var loaded = false
     val gridState = LazyGridState()
 }
@@ -663,7 +763,12 @@ private fun KomgaSeriesList(
             loading = true
             try {
                 val p = if (reset) 0 else state.page
-                val r = client.series(page = p, libraryId = libraryId, search = state.searchQuery.ifBlank { null })
+                val r = client.series(
+                    page = p,
+                    libraryId = libraryId,
+                    search = state.searchQuery.ifBlank { null },
+                    sort = state.sort.query
+                )
                 state.items = if (reset) r.items else state.items + r.items
                 state.isLast = r.isLast
                 state.page = p + 1
@@ -695,17 +800,38 @@ private fun KomgaSeriesList(
     }
 
     Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = search,
-            onValueChange = { search = it },
-            placeholder = { Text("搜索系列…") },
-            singleLine = true,
-            shape = RoundedCornerShape(24.dp),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            trailingIcon = {
-                TextButton(onClick = { state.searchQuery = search; load(reset = true) }) { Text("搜索") }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = search,
+                onValueChange = { search = it },
+                placeholder = { Text("搜索系列…") },
+                singleLine = true,
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.weight(1f),
+                trailingIcon = {
+                    TextButton(onClick = { state.searchQuery = search; load(reset = true) }) { Text("搜索") }
+                }
+            )
+            Spacer(Modifier.width(8.dp))
+            KomgaSortButton(
+                label = state.sort.label,
+                ascending = state.sort.ascending,
+                options = KomgaSeriesSort.entries.map { it.label to (it.label == state.sort.label) }
+            ) { index ->
+                val option = KomgaSeriesSort.entries[index]
+                val same = option.field == state.sort.field
+                state.sort = if (same) {
+                    state.sort.copy(ascending = !state.sort.ascending)
+                } else {
+                    KomgaSortState(option.field, option.label, option.defaultAscending)
+                }
+                state.page = 0
+                load(reset = true)
             }
-        )
+        }
 
         if (state.items.isEmpty() && loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -806,11 +932,20 @@ private fun KomgaSeriesDetail(client: KomgaClient, seriesId: String) {
     var addToListBook by remember { mutableStateOf<KomgaBook?>(null) }
     var listMsg by remember { mutableStateOf<String?>(null) }
     var refreshTick by remember { mutableStateOf(0) }
+    var sort by remember(seriesId) {
+        mutableStateOf(
+            KomgaSortState(
+                KomgaBookSort.Number.field,
+                KomgaBookSort.Number.label,
+                KomgaBookSort.Number.defaultAscending
+            )
+        )
+    }
 
-    LaunchedEffect(seriesId, refreshTick) {
+    LaunchedEffect(seriesId, refreshTick, sort) {
         error = null
         try {
-            books = client.seriesBooks(seriesId)
+            books = client.seriesBooks(seriesId, sort.query)
         } catch (e: Exception) {
             error = e.message
         }
@@ -847,23 +982,41 @@ private fun KomgaSeriesDetail(client: KomgaClient, seriesId: String) {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item {
-                    Text(
-                        "共 ${list.size} 本 · 已读完 $readCount 本",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (list.isNotEmpty()) {
-                        Spacer(Modifier.height(6.dp))
-                        LinearProgressIndicator(
-                            progress = { readCount.toFloat() / list.size },
-                            modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    listMsg?.let {
-                        Spacer(Modifier.height(4.dp))
-                        Text(it, style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary)
+                    Row(verticalAlignment = Alignment.Top) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "共 ${list.size} 本 · 已读完 $readCount 本",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (list.isNotEmpty()) {
+                                Spacer(Modifier.height(6.dp))
+                                LinearProgressIndicator(
+                                    progress = { readCount.toFloat() / list.size },
+                                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            listMsg?.let {
+                                Spacer(Modifier.height(4.dp))
+                                Text(it, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        KomgaSortButton(
+                            label = sort.label,
+                            ascending = sort.ascending,
+                            options = KomgaBookSort.entries.map { it.label to (it.label == sort.label) }
+                        ) { index ->
+                            val option = KomgaBookSort.entries[index]
+                            val same = option.field == sort.field
+                            sort = if (same) {
+                                sort.copy(ascending = !sort.ascending)
+                            } else {
+                                KomgaSortState(option.field, option.label, option.defaultAscending)
+                            }
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
                 }

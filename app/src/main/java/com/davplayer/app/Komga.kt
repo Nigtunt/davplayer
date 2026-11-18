@@ -108,9 +108,10 @@ class KomgaClient(baseUrl: String, email: String, pass: String) {
         page: Int = 0,
         size: Int = 30,
         libraryId: String? = null,
-        search: String? = null
+        search: String? = null,
+        sort: String = "metadata.titleSort,asc"
     ): PagedResult<KomgaSeries> {
-        val q = StringBuilder("/api/v1/series?page=$page&size=$size&sort=metadata.titleSort,asc")
+        val q = StringBuilder("/api/v1/series?page=$page&size=$size&sort=$sort")
         if (!libraryId.isNullOrBlank()) q.append("&library_id=").append(libraryId)
         if (!search.isNullOrBlank()) q.append("&search=").append(URLEncoder.encode(search, "UTF-8"))
         return parseSeriesPage(getJson(q.toString()))
@@ -122,8 +123,11 @@ class KomgaClient(baseUrl: String, email: String, pass: String) {
     suspend fun onDeck(size: Int = 12): List<KomgaBook> =
         parseBookPage(getJson("/api/v1/books/ondeck?page=0&size=$size")).items
 
-    suspend fun seriesBooks(seriesId: String): List<KomgaBook> =
-        parseBookPage(getJson("/api/v1/series/$seriesId/books?unpaged=true&sort=metadata.numberSort,asc")).items
+    suspend fun seriesBooks(
+        seriesId: String,
+        sort: String = "metadata.numberSort,asc"
+    ): List<KomgaBook> =
+        parseBookPage(getJson("/api/v1/series/$seriesId/books?unpaged=true&sort=$sort")).items
 
     suspend fun bookPages(bookId: String): List<KomgaPage> {
         val arr = JSONArray(getJson("/api/v1/books/$bookId/pages"))

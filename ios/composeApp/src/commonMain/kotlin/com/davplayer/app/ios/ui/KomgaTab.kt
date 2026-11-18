@@ -2,6 +2,7 @@ package com.davplayer.app.ios.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -51,6 +52,8 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -702,6 +705,93 @@ private fun CoverCard(
 
 // ---------- 系列列表 ----------
 
+private enum class SeriesSort(
+    val label: String,
+    val field: String,
+    val defaultAscending: Boolean
+) {
+    Title("标题", "metadata.titleSort", true),
+    Updated("最近更新", "lastModified", false),
+    Added("最近添加", "created", false),
+    FileUpdated("文件修改", "fileLastModified", false),
+    Books("书籍数量", "booksCount", false),
+    Read("已读数量", "booksReadCount", false),
+    Unread("未读数量", "booksUnreadCount", false),
+    InProgress("在读数量", "booksInProgressCount", false),
+    Publisher("出版社", "metadata.publisher", true),
+    Release("发行日期", "booksMetadata.releaseDate", false),
+    AgeRating("年龄分级", "metadata.ageRating", false),
+    TotalBooks("预期总册数", "metadata.totalBookCount", false)
+}
+
+private enum class SeriesBookSort(
+    val label: String,
+    val field: String,
+    val defaultAscending: Boolean
+) {
+    Number("卷号", "metadata.numberSort", true),
+    Title("标题", "metadata.title", true),
+    Release("发行日期", "metadata.releaseDate", false),
+    Added("最近添加", "created", false),
+    Updated("最近更新", "lastModified", false),
+    FileUpdated("文件修改", "fileLastModified", false),
+    Size("文件大小", "sizeBytes", false),
+    Pages("页数", "media.pagesCount", false),
+    ReadPage("阅读进度", "readProgress.page", false),
+    ReadDate("最近阅读", "readProgress.lastModified", false),
+    Isbn("ISBN", "metadata.isbn", true)
+}
+
+private data class SortState(val field: String, val label: String, val ascending: Boolean) {
+    val query: String get() = "$this.field,${if (ascending) "asc" else "desc"}"
+}
+
+@Composable
+private fun SortMenu(
+    label: String,
+    ascending: Boolean,
+    options: List<String>,
+    selectedLabel: String,
+    onSelect: (Int) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(50))
+                .background(SurfaceHigh)
+                .clickable { expanded = true }
+                .padding(start = 12.dp, end = 9.dp, top = 7.dp, bottom = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = TextMain)
+            Spacer(Modifier.width(4.dp))
+            Text(
+                if (ascending) "↑" else "↓",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = Brand
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEachIndexed { index, text ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            if (text == selectedLabel) "$text  ${if (ascending) "↑" else "↓"}" else text,
+                            fontSize = 13.sp
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onSelect(index)
+                    }
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun SeriesListScreen(
     client: KomgaClient,
@@ -709,6 +799,15 @@ private fun SeriesListScreen(
     onOpenSeries: (KomgaSeries) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
+    var sort by remember {
+        mutableStateOf(
+            SortState(
+                SeriesSort.Title.field,
+                SeriesSort.Title.label,
+                SeriesSort.Title.defaultAscending
+            )
+        )
+    }
     var items by remember { mutableStateOf<List<KomgaSeries>>(emptyList()) }
     var page by remember { mutableStateOf(0) }
     var isLast by remember { mutableStateOf(true) }
@@ -718,13 +817,19 @@ private fun SeriesListScreen(
     val scope = rememberCoroutineScope()
     val gridState = rememberLazyGridState()
 
-    LaunchedEffect(client, libraryId, reload) {
+    LaunchedEffect(client, libraryId, reload, sort) {
         loading = true
         error = null
         items = emptyList()
         page = 0
         runCatching {
-            client.series(page = 0, size = 30, libraryId = libraryId, search = query.ifBlank { null })
+            client.series(
+                page = 0,
+                size = 30,
+                libraryId = libraryId,
+                search = query.ifBlank { null },
+                sort = sort.query
+            )
         }.onSuccess {
             items = it.content
             isLast = it.last
@@ -739,7 +844,13 @@ private fun SeriesListScreen(
         scope.launch {
             loading = true
             runCatching {
-                client.series(page = page + 1, size = 30, libraryId = libraryId, search = query.ifBlank { null })
+                client.series(
+                    page = page + 1,
+                    size = 30,
+                    libraryId = libraryId,
+                    search = query.ifBlank { null },
+                    sort = sort.query
+                )
             }.onSuccess {
                 items = items + it.content
                 page += 1
@@ -767,6 +878,20 @@ private fun SeriesListScreen(
             )
             Button(onClick = { reload++ }, shape = RoundedCornerShape(999.dp)) {
                 Text("搜索", fontSize = 12.sp)
+            }
+            SortMenu(
+                label = sort.label,
+                ascending = sort.ascending,
+                options = SeriesSort.entries.map { it.label },
+                selectedLabel = sort.label
+            ) { index ->
+                val option = SeriesSort.entries[index]
+                val same = option.field == sort.field
+                sort = if (same) {
+                    sort.copy(ascending = !sort.ascending)
+                } else {
+                    SortState(option.field, option.label, option.defaultAscending)
+                }
             }
         }
 
@@ -845,12 +970,21 @@ private fun SeriesDetailScreen(
     var loading by remember(client, seriesId) { mutableStateOf(true) }
     var error by remember(client, seriesId) { mutableStateOf<String?>(null) }
     var reload by remember { mutableStateOf(0) }
+    var sort by remember(seriesId) {
+        mutableStateOf(
+            SortState(
+                SeriesBookSort.Number.field,
+                SeriesBookSort.Number.label,
+                SeriesBookSort.Number.defaultAscending
+            )
+        )
+    }
     var addBook by remember { mutableStateOf<KomgaBook?>(null) }
 
-    LaunchedEffect(client, seriesId, reload) {
+    LaunchedEffect(client, seriesId, reload, sort) {
         loading = true
         error = null
-        runCatching { client.seriesBooks(seriesId) }
+        runCatching { client.seriesBooks(seriesId, sort.query) }
             .onSuccess { books = it }
             .onFailure { error = it.message ?: "加载失败" }
         loading = false
@@ -865,10 +999,29 @@ private fun SeriesDetailScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item {
-                Text(seriesTitle, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                val read = books.count { it.readCompleted }
-                Text("共 ${books.size} 本 · 已读完 $read 本", fontSize = 12.sp, color = Muted)
+                Row(verticalAlignment = Alignment.Top) {
+                    Column(Modifier.weight(1f)) {
+                        Text(seriesTitle, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(4.dp))
+                        val read = books.count { it.readCompleted }
+                        Text("共 ${books.size} 本 · 已读完 $read 本", fontSize = 12.sp, color = Muted)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    SortMenu(
+                        label = sort.label,
+                        ascending = sort.ascending,
+                        options = SeriesBookSort.entries.map { it.label },
+                        selectedLabel = sort.label
+                    ) { index ->
+                        val option = SeriesBookSort.entries[index]
+                        val same = option.field == sort.field
+                        sort = if (same) {
+                            sort.copy(ascending = !sort.ascending)
+                        } else {
+                            SortState(option.field, option.label, option.defaultAscending)
+                        }
+                    }
+                }
             }
 
             lazyItems(books, key = { it.id }) { book ->
