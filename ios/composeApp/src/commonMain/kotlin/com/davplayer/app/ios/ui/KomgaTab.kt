@@ -86,6 +86,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.davplayer.app.ios.data.ComicStore
+import com.davplayer.app.ios.data.AppLog
 import com.davplayer.app.ios.data.KomgaBook
 import com.davplayer.app.ios.data.KomgaClient
 import com.davplayer.app.ios.data.KomgaConfig
@@ -729,17 +730,14 @@ private enum class SeriesBookSort(
     val field: String,
     val defaultAscending: Boolean
 ) {
-    Number("卷号", "metadata.numberSort", true),
     Title("标题", "metadata.title", true),
-    Release("发行日期", "metadata.releaseDate", false),
     Added("最近添加", "created", false),
     Updated("最近更新", "lastModified", false),
     FileUpdated("文件修改", "fileLastModified", false),
     Size("文件大小", "sizeBytes", false),
     Pages("页数", "media.pagesCount", false),
     ReadPage("阅读进度", "readProgress.page", false),
-    ReadDate("最近阅读", "readProgress.lastModified", false),
-    Isbn("ISBN", "metadata.isbn", true)
+    ReadDate("最近阅读", "readProgress.lastModified", false)
 }
 
 private data class SortState(val field: String, val label: String, val ascending: Boolean) {
@@ -973,9 +971,9 @@ private fun SeriesDetailScreen(
     var sort by remember(seriesId) {
         mutableStateOf(
             SortState(
-                SeriesBookSort.Number.field,
-                SeriesBookSort.Number.label,
-                SeriesBookSort.Number.defaultAscending
+                SeriesBookSort.Title.field,
+                SeriesBookSort.Title.label,
+                SeriesBookSort.Title.defaultAscending
             )
         )
     }
@@ -1020,9 +1018,10 @@ private fun SeriesDetailScreen(
                         } else {
                             SortState(option.field, option.label, option.defaultAscending)
                         }
-                    }
-                }
-            }
+                        AppLog.info("Komga", "series sort selected: ${sort.query}")
+                        }
+                        }
+                        }
 
             lazyItems(books, key = { it.id }) { book ->
                 BookRow(
@@ -1075,7 +1074,16 @@ private fun BookRow(
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(4.dp))
-            Text(statusText(book), fontSize = 11.sp, color = Muted)
+            Text(
+                buildString {
+                    append(statusText(book))
+                    if (book.sizeBytes > 0) append(" · ${formatSize(book.sizeBytes)}")
+                },
+                fontSize = 11.sp,
+                color = Muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             if (book.pagesCount > 0) {
                 Spacer(Modifier.height(6.dp))
                 ThinProgress(book.readPage.toFloat() / book.pagesCount)

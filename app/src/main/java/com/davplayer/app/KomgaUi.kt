@@ -98,17 +98,14 @@ private enum class KomgaBookSort(
     val field: String,
     val defaultAscending: Boolean
 ) {
-    Number("卷号", "metadata.numberSort", true),
     Title("标题", "metadata.title", true),
-    Release("发行日期", "metadata.releaseDate", false),
     Added("最近添加", "created", false),
     Updated("最近更新", "lastModified", false),
     FileUpdated("文件修改", "fileLastModified", false),
     Size("文件大小", "sizeBytes", false),
     Pages("页数", "media.pagesCount", false),
     ReadPage("阅读进度", "readProgress.page", false),
-    ReadDate("最近阅读", "readProgress.lastModified", false),
-    Isbn("ISBN", "metadata.isbn", true)
+    ReadDate("最近阅读", "readProgress.lastModified", false)
 }
 
 data class KomgaSortState(val field: String, val label: String, val ascending: Boolean) {
@@ -754,11 +751,14 @@ private fun KomgaSeriesList(
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var search by remember { mutableStateOf(state.searchQuery) }
+    var loadVersion by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
     val gridState = state.gridState
 
     fun load(reset: Boolean) {
-        if (loading) return
+        // 排序/搜索触发的 reset 不能被上一页的 loading 挡住
+        if (loading && !reset) return
+        val version = ++loadVersion
         scope.launch {
             loading = true
             try {
@@ -769,13 +769,15 @@ private fun KomgaSeriesList(
                     search = state.searchQuery.ifBlank { null },
                     sort = state.sort.query
                 )
+                if (version != loadVersion) return@launch
                 state.items = if (reset) r.items else state.items + r.items
                 state.isLast = r.isLast
                 state.page = p + 1
             } catch (e: Exception) {
-                error = e.message
+                if (version == loadVersion) error = e.message
+            } finally {
+                if (version == loadVersion) loading = false
             }
-            loading = false
         }
     }
 
@@ -828,6 +830,7 @@ private fun KomgaSeriesList(
                 } else {
                     KomgaSortState(option.field, option.label, option.defaultAscending)
                 }
+                AppLog.log("Komga", "series sort selected: ${state.sort.query}")
                 state.page = 0
                 load(reset = true)
             }
@@ -935,9 +938,9 @@ private fun KomgaSeriesDetail(client: KomgaClient, seriesId: String) {
     var sort by remember(seriesId) {
         mutableStateOf(
             KomgaSortState(
-                KomgaBookSort.Number.field,
-                KomgaBookSort.Number.label,
-                KomgaBookSort.Number.defaultAscending
+                KomgaBookSort.Title.field,
+                KomgaBookSort.Title.label,
+                KomgaBookSort.Title.defaultAscending
             )
         )
     }
@@ -1082,8 +1085,16 @@ private fun BookRow(
                     book.inProgress -> "读到第 ${book.readPage} 页 / 共 ${book.pagesCount} 页"
                     else -> "共 ${book.pagesCount} 页 · 未读"
                 }
-                Text(status, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    buildString {
+                        append(status)
+                        if (book.sizeBytes > 0) append(" · ${formatSize(book.sizeBytes)}")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 if (book.inProgress && book.pagesCount > 0) {
                     Spacer(Modifier.height(6.dp))
                     LinearProgressIndicator(

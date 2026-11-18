@@ -132,6 +132,7 @@ class KomgaClient(baseUrl: String, email: String, pass: String) {
     }
 
     private suspend fun getJson(path: String): String {
+        AppLog.info("Komga", "GET $base$path")
         val response = http.get("$base$path") {
             header(HttpHeaders.Authorization, authHeader)
         }

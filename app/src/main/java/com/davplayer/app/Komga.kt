@@ -78,6 +78,7 @@ class KomgaClient(baseUrl: String, email: String, pass: String) {
         .build()
 
     private suspend fun getJson(path: String): String = withContext(Dispatchers.IO) {
+        AppLog.log("Komga", "GET $base$path")
         http.newCall(Request.Builder().url("$base$path").build()).execute().use { r ->
             if (r.code !in 200..299) throw IOException("Komga 请求失败: HTTP ${r.code}")
             r.body?.string() ?: ""
