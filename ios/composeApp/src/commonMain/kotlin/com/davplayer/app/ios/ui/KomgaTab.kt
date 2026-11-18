@@ -715,14 +715,7 @@ private enum class SeriesSort(
     Updated("最近更新", "lastModified", false),
     Added("最近添加", "created", false),
     FileUpdated("文件修改", "fileLastModified", false),
-    Books("书籍数量", "booksCount", false),
-    Read("已读数量", "booksReadCount", false),
-    Unread("未读数量", "booksUnreadCount", false),
-    InProgress("在读数量", "booksInProgressCount", false),
-    Publisher("出版社", "metadata.publisher", true),
-    Release("发行日期", "booksMetadata.releaseDate", false),
-    AgeRating("年龄分级", "metadata.ageRating", false),
-    TotalBooks("预期总册数", "metadata.totalBookCount", false)
+    Books("书籍数量", "booksCount", false)
 }
 
 private enum class SeriesBookSort(
@@ -734,10 +727,8 @@ private enum class SeriesBookSort(
     Added("最近添加", "created", false),
     Updated("最近更新", "lastModified", false),
     FileUpdated("文件修改", "fileLastModified", false),
-    Size("文件大小", "sizeBytes", false),
-    Pages("页数", "media.pagesCount", false),
-    ReadPage("阅读进度", "readProgress.page", false),
-    ReadDate("最近阅读", "readProgress.lastModified", false)
+    Size("文件大小", "fileSize", true),
+    Pages("页数", "media.pagesCount", false)
 }
 
 private data class SortState(val field: String, val label: String, val ascending: Boolean) {
@@ -800,9 +791,9 @@ private fun SeriesListScreen(
     var sort by remember {
         mutableStateOf(
             SortState(
-                SeriesSort.Title.field,
-                SeriesSort.Title.label,
-                SeriesSort.Title.defaultAscending
+                SeriesSort.Updated.field,
+                SeriesSort.Updated.label,
+                SeriesSort.Updated.defaultAscending
             )
         )
     }
@@ -971,9 +962,9 @@ private fun SeriesDetailScreen(
     var sort by remember(seriesId) {
         mutableStateOf(
             SortState(
-                SeriesBookSort.Title.field,
-                SeriesBookSort.Title.label,
-                SeriesBookSort.Title.defaultAscending
+                SeriesBookSort.Updated.field,
+                SeriesBookSort.Updated.label,
+                SeriesBookSort.Updated.defaultAscending
             )
         )
     }

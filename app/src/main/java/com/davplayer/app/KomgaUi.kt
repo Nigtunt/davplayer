@@ -83,14 +83,7 @@ private enum class KomgaSeriesSort(
     Updated("最近更新", "lastModified", false),
     Added("最近添加", "created", false),
     FileUpdated("文件修改", "fileLastModified", false),
-    Books("书籍数量", "booksCount", false),
-    Read("已读数量", "booksReadCount", false),
-    Unread("未读数量", "booksUnreadCount", false),
-    InProgress("在读数量", "booksInProgressCount", false),
-    Publisher("出版社", "metadata.publisher", true),
-    Release("发行日期", "booksMetadata.releaseDate", false),
-    AgeRating("年龄分级", "metadata.ageRating", false),
-    TotalBooks("预期总册数", "metadata.totalBookCount", false)
+    Books("书籍数量", "booksCount", false)
 }
 
 private enum class KomgaBookSort(
@@ -102,10 +95,8 @@ private enum class KomgaBookSort(
     Added("最近添加", "created", false),
     Updated("最近更新", "lastModified", false),
     FileUpdated("文件修改", "fileLastModified", false),
-    Size("文件大小", "sizeBytes", false),
-    Pages("页数", "media.pagesCount", false),
-    ReadPage("阅读进度", "readProgress.page", false),
-    ReadDate("最近阅读", "readProgress.lastModified", false)
+    Size("文件大小", "fileSize", true),
+    Pages("页数", "media.pagesCount", false)
 }
 
 data class KomgaSortState(val field: String, val label: String, val ascending: Boolean) {
@@ -170,9 +161,9 @@ class KomgaSeriesListState {
     var searchQuery by mutableStateOf("")
     var sort by mutableStateOf(
         KomgaSortState(
-            KomgaSeriesSort.Title.field,
-            KomgaSeriesSort.Title.label,
-            KomgaSeriesSort.Title.defaultAscending
+            KomgaSeriesSort.Updated.field,
+            KomgaSeriesSort.Updated.label,
+            KomgaSeriesSort.Updated.defaultAscending
         )
     )
     var loaded = false
@@ -938,9 +929,9 @@ private fun KomgaSeriesDetail(client: KomgaClient, seriesId: String) {
     var sort by remember(seriesId) {
         mutableStateOf(
             KomgaSortState(
-                KomgaBookSort.Title.field,
-                KomgaBookSort.Title.label,
-                KomgaBookSort.Title.defaultAscending
+                KomgaBookSort.Updated.field,
+                KomgaBookSort.Updated.label,
+                KomgaBookSort.Updated.defaultAscending
             )
         )
     }
