@@ -109,7 +109,7 @@ private enum class KomgaBookSort(
 }
 
 data class KomgaSortState(val field: String, val label: String, val ascending: Boolean) {
-    val query: String get() = "$this.field,${if (ascending) "asc" else "desc"}"
+    val query: String get() = "${this.field},${if (ascending) "asc" else "desc"}"
 }
 
 @Composable

@@ -741,7 +741,7 @@ private enum class SeriesBookSort(
 }
 
 private data class SortState(val field: String, val label: String, val ascending: Boolean) {
-    val query: String get() = "$this.field,${if (ascending) "asc" else "desc"}"
+    val query: String get() = "${this.field},${if (ascending) "asc" else "desc"}"
 }
 
 @Composable
