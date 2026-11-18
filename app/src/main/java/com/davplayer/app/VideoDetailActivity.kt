@@ -2,11 +2,13 @@ package com.davplayer.app
 
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
+import android.graphics.SurfaceTexture
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.LayoutInflater
 import android.view.PixelCopy
+import android.view.Surface
 import android.view.SurfaceView
 import android.view.TextureView
 import android.view.View
@@ -140,6 +142,8 @@ class VideoDetailActivity : ComponentActivity() {
     private var pendingStartPlayer: ExoPlayer? = null
     private var pendingOldPlayer: ExoPlayer? = null
     private var pendingPlayWhenReady = false
+    private var dummySurface: Surface? = null
+    private var dummySurfaceTexture: SurfaceTexture? = null
     private val historyStore by lazy { HistoryStore(this) }
     private val fullscreen = mutableStateOf(false)
     private val switching = mutableStateOf(false)
@@ -384,6 +388,7 @@ class VideoDetailActivity : ComponentActivity() {
                             )
                         }
                     })
+                    if (muted) attachDummySurface(exoPlayer)
                     setMediaItem(item)
                     prepare()
                     if (startPosition > 0) seekTo(startPosition)
@@ -395,6 +400,28 @@ class VideoDetailActivity : ComponentActivity() {
         }.onFailure {
             AppLog.log("PLAYER", "create failed mode=${mode.label}: ${it.message}")
         }.getOrNull()
+    }
+
+    private fun attachDummySurface(player: ExoPlayer) {
+        releaseDummySurface()
+        runCatching {
+            val texture = SurfaceTexture(0)
+            texture.setDefaultBufferSize(1920, 1080)
+            val surface = Surface(texture)
+            player.setVideoSurface(surface)
+            dummySurface = surface
+            dummySurfaceTexture = texture
+            AppLog.log("PLAYER", "shadow dummy surface attached")
+        }.onFailure {
+            AppLog.log("PLAYER", "shadow dummy surface failed: ${it.message}")
+        }
+    }
+
+    private fun releaseDummySurface() {
+        dummySurface?.release()
+        dummySurfaceTexture?.release()
+        dummySurface = null
+        dummySurfaceTexture = null
     }
 
     private fun switchDecodeMode(mode: VideoDecodeMode) {
@@ -449,6 +476,7 @@ class VideoDetailActivity : ComponentActivity() {
             timeout?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
             switchingPlayer = false
             switching.value = false
+            releaseDummySurface()
             shadow.release()
             AppLog.log("PLAYER", "switch failed mode=${mode.label}: $reason")
             Toast.makeText(this, "切换失败，继续使用当前解码", Toast.LENGTH_SHORT).show()
@@ -513,6 +541,7 @@ class VideoDetailActivity : ComponentActivity() {
             return
         }
         pendingStartPlayer = null
+        releaseDummySurface()
         target.playWhenReady = pendingPlayWhenReady
         AppLog.log("PLAYER", "switch start mode=${decodeMode.value.label}")
         val old = pendingOldPlayer
@@ -682,6 +711,7 @@ class VideoDetailActivity : ComponentActivity() {
 
     override fun onDestroy() {
         saveHistory()
+        releaseDummySurface()
         player?.release()
         player = null
         super.onDestroy()
