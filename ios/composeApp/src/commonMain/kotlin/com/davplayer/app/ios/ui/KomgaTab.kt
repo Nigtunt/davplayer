@@ -77,12 +77,15 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.davplayer.app.ios.data.ComicStore
 import com.davplayer.app.ios.data.AppLog
 import com.davplayer.app.ios.data.KomgaBook
@@ -742,7 +745,8 @@ private fun SortMenu(
     onSelect: (Int) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Column {
+    val density = LocalDensity.current
+    Box {
         Row(
             Modifier
                 .clip(RoundedCornerShape(50))
@@ -760,35 +764,43 @@ private fun SortMenu(
                 color = Brand
             )
         }
-        // 不使用 DropdownMenu：iOS 上它基于独立 UIKit ComposeSceneLayer，
-        // 快速切换排序时反复销毁弹层会触发 Compose DepthSortedSet 崩溃。
-        if (expanded) {
-            Column(
-                Modifier
-                    .padding(top = 4.dp)
-                    .width(158.dp)
-                    .shadow(4.dp, RoundedCornerShape(12.dp), ambientColor = Color(0x18101828))
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(SurfaceHigh)
-            ) {
-                options.forEachIndexed { index, text ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                expanded = false
-                                onSelect(index)
-                            }
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            if (text == selectedLabel) "$text  ${if (ascending) "↑" else "↓"}" else text,
-                            fontSize = 13.sp,
-                            color = TextMain
-                        )
+        // Popup 始终保留在组合中，只切换内部内容；避免 DropdownMenu
+        // 每次开关都创建/销毁 UIKit ComposeSceneLayer 导致崩溃。
+        Popup(
+            alignment = Alignment.TopEnd,
+            offset = IntOffset(0, with(density) { 34.dp.roundToPx() }),
+            onDismissRequest = { expanded = false },
+            properties = PopupProperties(focusable = false)
+        ) {
+            if (expanded) {
+                Column(
+                    Modifier
+                        .width(158.dp)
+                        .shadow(4.dp, RoundedCornerShape(12.dp), ambientColor = Color(0x18101828))
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(SurfaceHigh)
+                ) {
+                    options.forEachIndexed { index, text ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    expanded = false
+                                    onSelect(index)
+                                }
+                                .padding(horizontal = 14.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                if (text == selectedLabel) "$text  ${if (ascending) "↑" else "↓"}" else text,
+                                fontSize = 13.sp,
+                                color = TextMain
+                            )
+                        }
                     }
                 }
+            } else {
+                Spacer(Modifier.size(0.dp))
             }
         }
     }
