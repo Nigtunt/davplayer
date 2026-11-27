@@ -47,8 +47,8 @@ android {
         applicationId = "com.davplayer.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 16
-        versionName = "3.3.2"
+        versionCode = 17
+        versionName = "3.3.3"
     }
 
     signingConfigs {
