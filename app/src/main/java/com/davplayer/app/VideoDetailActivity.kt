@@ -83,6 +83,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -1076,6 +1077,7 @@ private fun InlineVideoPlayer(
     var boosting by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
     var menuOpen by remember { mutableStateOf(false) }
+    var decodeMenuOpen by remember { mutableStateOf(false) }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -1131,6 +1133,15 @@ private fun InlineVideoPlayer(
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                         setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                         setBackgroundColor(android.graphics.Color.BLACK)
+                        isClickable = false
+                        isFocusable = false
+                        setOnTouchListener { _, _ -> false }
+                        (getVideoSurfaceView() as? SurfaceView)?.apply {
+                            isClickable = false
+                            isFocusable = false
+                            setZOrderOnTop(false)
+                            setZOrderMediaOverlay(false)
+                        }
                         subtitleView?.apply {
                             setApplyEmbeddedStyles(true)
                             setApplyEmbeddedFontSizes(true)
@@ -1142,11 +1153,12 @@ private fun InlineVideoPlayer(
                     videoSurface = view.getVideoSurfaceView() as? View
                     onSurfaceReady()
                 },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize().zIndex(-1f)
             )
         }
 
-        // 空白区域手势：单击显隐控制层，双击全屏，长按临时倍速，横滑调进度
+        // 空白区域手势：单击显隐控制层，双击全屏，长按临时倍速，横滑调进度。
+        // 必须盖在 SurfaceView 上方，否则切到 surface_view 后手势会被原生视图吃掉。
         Box(
             Modifier
                 .fillMaxSize()
@@ -1289,17 +1301,6 @@ private fun InlineVideoPlayer(
                     Icon(Icons.Default.MoreVert, "更多", tint = Color.White)
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    VideoDecodeMode.entries.forEach { mode ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(if (mode == decodeMode) "✓ ${mode.label}" else mode.label)
-                            },
-                            onClick = {
-                                menuOpen = false
-                                onSwitchDecodeMode(mode)
-                            }
-                        )
-                    }
                     DropdownMenuItem(
                         text = { Text("复制直链") },
                         leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
@@ -1425,18 +1426,36 @@ private fun InlineVideoPlayer(
                     fontSize = 10.sp
                 )
                 Spacer(Modifier.weight(1f))
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable { menuOpen = true }
-                        .padding(horizontal = 7.dp, vertical = 3.dp)
-                ) {
-                    Text(
-                        decodeMode.label,
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                Box {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { decodeMenuOpen = true }
+                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            decodeMode.label,
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = decodeMenuOpen,
+                        onDismissRequest = { decodeMenuOpen = false }
+                    ) {
+                        VideoDecodeMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(if (mode == decodeMode) "✓ ${mode.label}" else mode.label)
+                                },
+                                onClick = {
+                                    decodeMenuOpen = false
+                                    onSwitchDecodeMode(mode)
+                                }
+                            )
+                        }
+                    }
                 }
                 Spacer(Modifier.width(4.dp))
                 Box(
